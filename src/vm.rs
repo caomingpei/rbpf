@@ -382,7 +382,12 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         self.previous_instruction_meter = initial_insn_count;
         self.due_insn_count = 0;
         self.program_result = ProgramResult::Ok(0);
-        if interpreted {
+        // Force to use interpreter for now
+        const FORCE_INTERPRETED: bool = true;
+        // TODO: Remove this after testing
+        // if interpreted {
+        if FORCE_INTERPRETED {
+            println!("Hello, Rust! This is first change for inner code");
             #[cfg(feature = "debugger")]
             let debug_port = self.debug_port.clone();
             let mut interpreter = Interpreter::new(self, executable, self.registers);
