@@ -38,6 +38,8 @@ pub mod error;
 pub mod fuzz;
 pub mod insn_builder;
 pub mod interpreter;
+pub mod instrument;
+
 #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
 mod jit;
 #[cfg(feature = "jit")]

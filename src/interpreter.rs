@@ -19,6 +19,9 @@ use crate::{
     vm::{Config, ContextObject, EbpfVm},
 };
 
+
+use crate::instrument::jump::{JumpTracer, trace_jump};
+
 /// Virtual memory operation helper.
 macro_rules! translate_memory_access {
     (_impl, $self:ident, $op:ident, $vm_addr:ident, $T:ty, $($rest:expr),*) => {
@@ -91,6 +94,7 @@ pub struct Interpreter<'a, 'b, C: ContextObject> {
     pub(crate) executable: &'a Executable<C>,
     pub(crate) program: &'a [u8],
     pub(crate) program_vm_addr: u64,
+    pub(crate) jump_tracer: JumpTracer,
 
     /// General purpose registers and pc
     pub reg: [u64; 12],
@@ -107,6 +111,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         vm: &'a mut EbpfVm<'b, C>,
         executable: &'a Executable<C>,
         registers: [u64; 12],
+        jump_tracer: JumpTracer,
     ) -> Self {
         let (program_vm_addr, program) = executable.get_text_bytes();
         Self {
@@ -114,6 +119,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             executable,
             program,
             program_vm_addr,
+            jump_tracer,
             reg: registers,
             #[cfg(feature = "debugger")]
             debug_state: DebugState::Continue,
@@ -416,29 +422,29 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             },
 
             // BPF_JMP class
-            ebpf::JA         =>                                                   { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JEQ_IMM    => if  self.reg[dst] == insn.imm as u64              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JEQ_REG    => if  self.reg[dst] == self.reg[src]                { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JGT_IMM    => if  self.reg[dst] >  insn.imm as u64              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JGT_REG    => if  self.reg[dst] >  self.reg[src]                { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JGE_IMM    => if  self.reg[dst] >= insn.imm as u64              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JGE_REG    => if  self.reg[dst] >= self.reg[src]                { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JLT_IMM    => if  self.reg[dst] <  insn.imm as u64              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JLT_REG    => if  self.reg[dst] <  self.reg[src]                { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JLE_IMM    => if  self.reg[dst] <= insn.imm as u64              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JLE_REG    => if  self.reg[dst] <= self.reg[src]                { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JNE_IMM    => if  self.reg[dst] != insn.imm as u64              { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JNE_REG    => if  self.reg[dst] != self.reg[src]                { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSGT_IMM   => if (self.reg[dst] as i64) >  insn.imm             { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSGT_REG   => if (self.reg[dst] as i64) >  self.reg[src] as i64 { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSGE_IMM   => if (self.reg[dst] as i64) >= insn.imm             { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSGE_REG   => if (self.reg[dst] as i64) >= self.reg[src] as i64 { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSLT_IMM   => if (self.reg[dst] as i64) <  insn.imm             { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSLT_REG   => if (self.reg[dst] as i64) <  self.reg[src] as i64 { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSLE_IMM   => if (self.reg[dst] as i64) <= insn.imm             { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
-            ebpf::JSLE_REG   => if (self.reg[dst] as i64) <= self.reg[src] as i64 { next_pc = (next_pc as i64 + insn.off as i64) as u64; },
+            ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JEQ_IMM    => if  self.reg[dst] == insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JEQ_REG    => if  self.reg[dst] == self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGT_IMM    => if  self.reg[dst] >  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGT_REG    => if  self.reg[dst] >  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGE_IMM    => if  self.reg[dst] >= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGE_REG    => if  self.reg[dst] >= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JLT_IMM    => if  self.reg[dst] <  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JLT_REG    => if  self.reg[dst] <  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
+            ebpf::JLE_IMM    => if  self.reg[dst] <= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JLE_REG    => if  self.reg[dst] <= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
+            ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JNE_IMM    => if  self.reg[dst] != insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JNE_REG    => if  self.reg[dst] != self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSGT_IMM   => if (self.reg[dst] as i64) >  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSGT_REG   => if (self.reg[dst] as i64) >  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
+            ebpf::JSGE_IMM   => if (self.reg[dst] as i64) >= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSGE_REG   => if (self.reg[dst] as i64) >= self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLT_IMM   => if (self.reg[dst] as i64) <  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLT_REG   => if (self.reg[dst] as i64) <  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLE_IMM   => if (self.reg[dst] as i64) <= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLE_REG   => if (self.reg[dst] as i64) <= self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
 
             ebpf::CALL_REG   => {
                 let target_pc = if self.executable.get_sbpf_version().callx_uses_src_reg() {

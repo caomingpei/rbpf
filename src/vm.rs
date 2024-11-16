@@ -21,6 +21,9 @@ use crate::{
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, TraceLogEntry},
 };
+
+use crate::instrument::jump::JumpTracer;
+
 use rand::Rng;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
@@ -388,9 +391,10 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         // if interpreted {
         if FORCE_INTERPRETED {
             println!("Hello, Rust! This is first change for inner code");
+            let mut jump_tracer = JumpTracer::new();
             #[cfg(feature = "debugger")]
             let debug_port = self.debug_port.clone();
-            let mut interpreter = Interpreter::new(self, executable, self.registers);
+            let mut interpreter = Interpreter::new(self, executable, self.registers, jump_tracer);
             #[cfg(feature = "debugger")]
             if let Some(debug_port) = debug_port {
                 crate::debugger::execute(&mut interpreter, debug_port);
@@ -399,6 +403,8 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             }
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
+            
+            interpreter.jump_tracer.print_trace();
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {
