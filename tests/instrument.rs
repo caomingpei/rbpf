@@ -170,6 +170,19 @@ fn parser_scan_build() {
     let input_length = input.len();
     let padding_input: Vec<u8> = vec![0x00; parser::INPUT_MAX_SIZE - input_length];
     let input_args: [u8; parser::INPUT_MAX_SIZE] = [input, padding_input].concat().try_into().unwrap();
-    let top_ptr = parser::scan_build(input_args);
-    assert_eq!(top_ptr, input_length);
+    let semantic_struct = parser::scan_build(input_args);
+    let input_converted = semantic_struct.input;
+    let save_accounts = input_converted.accounts;
+    let save_instructions = input_converted.instructions;
+    assert_eq!(save_accounts.len(), account_number as usize);
+    assert_eq!(save_instructions.len(), instruction_number as usize);
+    let first_account_data = save_accounts[0].data;
+    assert_eq!(first_account_data[0], 0x05);
+}
+
+#[test]
+fn parser_length_checking() {
+    let account_normal_size = parser::AccountType::Normal as usize;
+    let normal_account = parser::AccountInfo::default();
+    assert_eq!(account_normal_size, std::mem::size_of_val(&normal_account));
 }
