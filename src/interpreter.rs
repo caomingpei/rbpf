@@ -21,7 +21,7 @@ use crate::{
 
 
 use crate::instrument::jump::{JumpTracer, trace_jump};
-use crate::instrument::taint::{LoadLogs, Log};
+use crate::instrument::*;
 
 
 /// Virtual memory operation helper.
@@ -97,7 +97,7 @@ pub struct Interpreter<'a, 'b, C: ContextObject> {
     pub(crate) program: &'a [u8],
     pub(crate) program_vm_addr: u64,
     pub(crate) jump_tracer: JumpTracer,
-    pub(crate) load_logs: LoadLogs,
+    pub(crate) taint_engine: taint::TaintEngine,
     /// General purpose registers and pc
     pub reg: [u64; 12],
 
@@ -114,7 +114,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         executable: &'a Executable<C>,
         registers: [u64; 12],
         jump_tracer: JumpTracer,
-        load_logs: LoadLogs,
+        taint_engine: taint::TaintEngine,
     ) -> Self {
         let (program_vm_addr, program) = executable.get_text_bytes();
         Self {
@@ -123,7 +123,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             program,
             program_vm_addr,
             jump_tracer,
-            load_logs,
+            taint_engine,
             reg: registers,
             #[cfg(feature = "debugger")]
             debug_state: DebugState::Continue,
@@ -204,29 +204,27 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::LD_B_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u8);
-                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
-                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
-                }
+                self.taint_engine.propagate(vm_addr, dst as u64);
             },
             ebpf::LD_H_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u16);
-                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
-                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                for i in 0..2 {
+                    self.taint_engine.propagate(vm_addr + i as u64, dst as u64);
                 }
             },
             ebpf::LD_W_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u32);
-                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
-                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                for i in 0..4 {
+                    self.taint_engine.propagate(vm_addr + i as u64, dst as u64);
                 }
             },
             ebpf::LD_DW_REG  => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u64);
-                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
-                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                for i in 0..8 {
+                    self.taint_engine.propagate(vm_addr + i as u64, dst as u64);
                 }
             },
 
