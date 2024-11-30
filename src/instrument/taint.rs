@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::ebpf;
 use std::fs::File;
 use std::io::Write;
+use std::fmt::{self, Debug};
 
 use crate::instrument::parser::*;
 
@@ -44,13 +45,24 @@ impl LoadLogs{
 }
 
 /// Type of the taint state
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum TaintState {
     Clean,
     Tainted {
         source: u64,
         color: Attribute,
     },
+}
+
+impl Debug for TaintState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TaintState::Clean => write!(f, "Clean"),
+            TaintState::Tainted { source, color } => {
+                write!(f, "Tainted {{ source: {:#09x}, color: {:?} }}", source, color)
+            }
+        }
+    }
 }
 
 /// History record the taint state of the memory
@@ -67,7 +79,7 @@ struct TaintHistory {
 }
 
 /// Memory struct to record the taint state of the memory
-struct Memory {
+pub struct TaintEngine {
     id: u64,
     pub history: Vec<TaintHistory>,
     pub state: HashMap<u64, TaintState>,
@@ -75,10 +87,10 @@ struct Memory {
     pub semantic_mapping: SemanticMapping,
 }
 
-impl Memory {
+impl TaintEngine {
     pub fn new(semantic_mapping: SemanticMapping) -> Self {
         // TODO: set the specific address to monitor
-        let mut memory = Memory { id: 0, history: Vec::new(), state: HashMap::new(), semantic_mapping };
+        let mut memory = TaintEngine { id: 0, history: Vec::new(), state: HashMap::new(), semantic_mapping };
         println!("Base input address is the default value: {:#018x}", INPUT_ADDRESS_U64);
         let mapping = &memory.semantic_mapping.mapping;
         for offset in mapping.keys() {
@@ -111,8 +123,17 @@ impl Memory {
     pub fn show_history(&self) {
         println!("Taint history: ");
         for history in &self.history {
-            println!("{:#018x} -> {:#018x}: {:?}", history.from, history.to, history.state);
+            println!("{:#09x} -> {:#09x}: {:?}", history.from, history.to, history.state);
         }
+    }
+
+    /// Save the taint history to the file
+    pub fn save_history(&self) {
+        let mut file = File::create("taint_history.txt").unwrap();
+        for history in &self.history {
+            writeln!(file, "Id: {:?}, From: {:#09x}, To: {:#09x}, State: {:?}", history.id, history.from, history.to, history.state).unwrap();
+        }
+        println!("Logs saved to taint_history.txt");
     }
 
     pub fn get_taint_state(&self, address: u64) -> TaintState {

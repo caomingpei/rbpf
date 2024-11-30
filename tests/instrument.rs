@@ -170,14 +170,20 @@ fn parser_scan_build() {
     let input_length = input.len();
     let padding_input: Vec<u8> = vec![0x00; parser::INPUT_MAX_SIZE - input_length];
     let input_args: [u8; parser::INPUT_MAX_SIZE] = [input, padding_input].concat().try_into().unwrap();
-    let semantic_struct = parser::scan_build(input_args);
-    let input_converted = semantic_struct.input;
+    let input_converted = parser::scan_build(input_args).input;
     let save_accounts = input_converted.accounts;
     let save_instructions = input_converted.instructions;
     assert_eq!(save_accounts.len(), account_number as usize);
     assert_eq!(save_instructions.len(), instruction_number as usize);
     let first_account_data = save_accounts[0].data;
+    assert_eq!(parser::convert_bytes_to_num::<u64>(&input_converted.instruction_number), instruction_number);
+    assert_eq!(parser::convert_bytes_to_num::<u64>(&input_converted.account_number), account_number);
     assert_eq!(first_account_data[0], 0x05);
+    for i in 0..duplicates.len() {
+        if duplicates[i] != 0xff {
+            assert_eq!(save_accounts[i].duplicate, duplicates[i]);
+        }
+    }
 }
 
 #[test]
