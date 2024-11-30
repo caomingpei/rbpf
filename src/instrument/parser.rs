@@ -80,7 +80,7 @@ impl Default for AccountInfo {
 /// let num = convert_bytes_to_num::<u32>(&value);
 /// assert_eq!(num, 255);
 /// ```
-fn convert_bytes_to_num<T>(value: &[u8]) -> T 
+pub fn convert_bytes_to_num<T>(value: &[u8]) -> T 
 where 
     T: Pod + Clone,
 {
@@ -106,6 +106,7 @@ where
 /// NumberInstruction: The number of instructions in the instruction
 /// Instruction: the instruction info
 /// ProgramId: The program id in the instruction
+#[derive(Clone, Debug)]
 pub enum Attribute {
     NumberAccount,
     Account {index: u64, info: String},

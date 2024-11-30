@@ -20,6 +20,7 @@ include = [
 
 [dependencies]
 arbitrary = { version = "1.0", optional = true, features = ["derive"] }
+bytemuck = "1.20.0"
 byteorder = "1.2"
 combine = "3.8.1"
 gdbstub = { version = "0.6.2", optional = true }

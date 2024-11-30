@@ -22,7 +22,9 @@ use crate::{
     static_analysis::{Analysis, TraceLogEntry},
 };
 
+/// Instrumentation
 use crate::instrument::jump::JumpTracer;
+use crate::instrument::taint::LoadLogs;
 
 use rand::Rng;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
@@ -363,6 +365,21 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         }
     }
 
+    /// Parse the input state from memory
+    pub fn parse_input_from_memory(memory_mapping: &MemoryMapping) -> Result<(), EbpfError> {
+        let account_number = memory_mapping.load::<u64>(crate::instrument::parser::INPUT_ADDRESS_U64);
+        match account_number {
+            ProgramResult::Ok(account_number) => println!("ACCOUNT NUMBER: {:?}", account_number),
+            ProgramResult::Err(e) => return Err(e),
+        }
+        let duplicate_flag = memory_mapping.load::<u8>(crate::instrument::parser::INPUT_ADDRESS_U64 + 8);
+        match duplicate_flag {
+            ProgramResult::Ok(flag) => println!("DUPLICATE FLAG: {:?}", flag),
+            ProgramResult::Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
     /// Execute the program
     ///
     /// If interpreted = `false` then the JIT compiled executable is used.
@@ -390,11 +407,16 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         // TODO: Remove this after testing
         // if interpreted {
         if FORCE_INTERPRETED {
-            println!("Hello, Rust! This is first change for inner code");
+            if let Err(e) = Self::parse_input_from_memory(&self.memory_mapping) {
+                return (0, ProgramResult::Err(e));
+            }else{
+                println!("Hello, Rust! This is first change for inner code");
+            }
             let mut jump_tracer = JumpTracer::new();
+            let mut load_logs = LoadLogs::new();
             #[cfg(feature = "debugger")]
             let debug_port = self.debug_port.clone();
-            let mut interpreter = Interpreter::new(self, executable, self.registers, jump_tracer);
+            let mut interpreter = Interpreter::new(self, executable, self.registers, jump_tracer, load_logs);
             #[cfg(feature = "debugger")]
             if let Some(debug_port) = debug_port {
                 crate::debugger::execute(&mut interpreter, debug_port);
@@ -404,7 +426,8 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
             
-            interpreter.jump_tracer.print_trace();
+            // interpreter.jump_tracer.print_trace();
+            interpreter.load_logs.show();
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {

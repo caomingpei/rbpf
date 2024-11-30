@@ -21,6 +21,8 @@ use crate::{
 
 
 use crate::instrument::jump::{JumpTracer, trace_jump};
+use crate::instrument::taint::{LoadLogs, Log};
+
 
 /// Virtual memory operation helper.
 macro_rules! translate_memory_access {
@@ -95,7 +97,7 @@ pub struct Interpreter<'a, 'b, C: ContextObject> {
     pub(crate) program: &'a [u8],
     pub(crate) program_vm_addr: u64,
     pub(crate) jump_tracer: JumpTracer,
-
+    pub(crate) load_logs: LoadLogs,
     /// General purpose registers and pc
     pub reg: [u64; 12],
 
@@ -112,6 +114,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         executable: &'a Executable<C>,
         registers: [u64; 12],
         jump_tracer: JumpTracer,
+        load_logs: LoadLogs,
     ) -> Self {
         let (program_vm_addr, program) = executable.get_text_bytes();
         Self {
@@ -120,6 +123,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             program,
             program_vm_addr,
             jump_tracer,
+            load_logs,
             reg: registers,
             #[cfg(feature = "debugger")]
             debug_state: DebugState::Continue,
@@ -200,18 +204,30 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::LD_B_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u8);
+                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
+                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                }
             },
             ebpf::LD_H_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u16);
+                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
+                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                }
             },
             ebpf::LD_W_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u32);
+                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
+                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                }
             },
             ebpf::LD_DW_REG  => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u64);
+                if vm_addr >= crate::instrument::parser::INPUT_ADDRESS_U64 {
+                    self.load_logs.insert( insn, vm_addr, self.reg[dst]);
+                }
             },
 
             // BPF_ST class
@@ -479,6 +495,11 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 if external {
                     if let Some((_function_name, function)) = self.executable.get_loader().get_function_registry().lookup_by_key(insn.imm as u32) {
                         resolved = true;
+                    
+                        // print the function name
+                        if let Ok(name) = std::str::from_utf8(_function_name) {
+                            println!("Calling syscall: {}", name);
+                        }
 
                         self.vm.due_insn_count = self.vm.previous_instruction_meter - self.vm.due_insn_count;
                         self.vm.registers[0..6].copy_from_slice(&self.reg[0..6]);
