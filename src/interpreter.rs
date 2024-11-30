@@ -196,6 +196,10 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::LD_DW_IMM  => {
                 ebpf::augment_lddw_unchecked(self.program, &mut insn);
                 self.reg[dst] = insn.imm as u64;
+                let dsts = taint::address_mapping(dst as u64, 8);
+                for i in 0..8 {
+                    self.taint_engine.clear_taint(dsts[i]);
+                }
                 self.reg[11] += 1;
                 next_pc += 1;
             },
@@ -204,27 +208,41 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::LD_B_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u8);
-                self.taint_engine.propagate(vm_addr, dst as u64);
+                let le_bytes_array = self.reg[dst].to_le_bytes();
+                let froms = taint::address_mapping(vm_addr, 1);
+                let tos = taint::address_mapping(dst as u64, 1);
+                for i in 0..1 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
             },
             ebpf::LD_H_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u16);
+                let le_bytes_array = self.reg[dst].to_le_bytes();
+                let froms = taint::address_mapping(vm_addr, 2);
+                let tos = taint::address_mapping(dst as u64, 2);
                 for i in 0..2 {
-                    self.taint_engine.propagate(vm_addr + i as u64, dst as u64);
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_W_REG   => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u32);
+                let le_bytes_array = self.reg[dst].to_le_bytes();
+                let froms = taint::address_mapping(vm_addr, 4);
+                let tos = taint::address_mapping(dst as u64, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate(vm_addr + i as u64, dst as u64);
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_DW_REG  => {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u64);
+                let le_bytes_array = self.reg[dst].to_le_bytes();
+                let froms = taint::address_mapping(vm_addr, 8);
+                let tos = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate(vm_addr + i as u64, dst as u64);
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
                 }
             },
 
@@ -232,36 +250,76 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::ST_B_IMM   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add( insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u8);
+                let tos = taint::address_mapping(vm_addr, 1);
+                for i in 0..1 {
+                    self.taint_engine.clear_taint(tos[i]);
+                }
             },
             ebpf::ST_H_IMM   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u16);
+                let tos = taint::address_mapping(vm_addr, 2);
+                for i in 0..2 {
+                    self.taint_engine.clear_taint(tos[i]);
+                }
             },
             ebpf::ST_W_IMM   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u32);
+                let tos = taint::address_mapping(vm_addr, 4);
+                for i in 0..4 {
+                    self.taint_engine.clear_taint(tos[i]);
+                }
             },
             ebpf::ST_DW_IMM  => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u64);
+                let tos = taint::address_mapping(vm_addr, 8);
+                for i in 0..8 {
+                    self.taint_engine.clear_taint(tos[i]);
+                }
             },
 
             // BPF_STX class
             ebpf::ST_B_REG   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u8);
+                let le_bytes_array = self.reg[src].to_le_bytes();
+                let froms = taint::address_mapping(src as u64, 1);
+                let tos = taint::address_mapping(vm_addr, 1);
+                for i in 0..1 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
             },
             ebpf::ST_H_REG   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u16);
+                let le_bytes_array = self.reg[src].to_le_bytes();
+                let froms = taint::address_mapping(src as u64, 2);
+                let tos = taint::address_mapping(vm_addr, 2);
+                for i in 0..2 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
             },
             ebpf::ST_W_REG   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u32);
+                let le_bytes_array = self.reg[src].to_le_bytes();
+                let froms = taint::address_mapping(src as u64, 4);
+                let tos = taint::address_mapping(vm_addr, 4);
+                for i in 0..4 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
             },
             ebpf::ST_DW_REG  => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u64);
+                let le_bytes_array = self.reg[src].to_le_bytes();
+                let froms = taint::address_mapping(src as u64, 8);
+                let tos = taint::address_mapping(vm_addr, 8);
+                for i in 0..8 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
             },
 
             // BPF_ALU class
@@ -296,8 +354,22 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             },
             ebpf::XOR32_IMM  => self.reg[dst] = (self.reg[dst] as u32             ^ insn.imm as u32)      as u64,
             ebpf::XOR32_REG  => self.reg[dst] = (self.reg[dst] as u32             ^ self.reg[src] as u32) as u64,
-            ebpf::MOV32_IMM  => self.reg[dst] = insn.imm as u32 as u64,
-            ebpf::MOV32_REG  => self.reg[dst] = (self.reg[src] as u32) as u64,
+            ebpf::MOV32_IMM  => {
+                self.reg[dst] = insn.imm as u32 as u64;
+                let tos = taint::address_mapping(dst as u64, 4);
+                for i in 0..4 {
+                    self.taint_engine.clear_taint(tos[i]);
+                }
+            },
+            ebpf::MOV32_REG  => {
+                self.reg[dst] = (self.reg[src] as u32) as u64;
+                let le_bytes_array = self.reg[src].to_le_bytes();
+                let froms = taint::address_mapping(src as u64, 4);
+                let tos = taint::address_mapping(dst as u64, 4);
+                for i in 0..4 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
+            },
             ebpf::ARSH32_IMM => self.reg[dst] = (self.reg[dst] as i32).wrapping_shr(insn.imm as u32)      as u64 & (u32::MAX as u64),
             ebpf::ARSH32_REG => self.reg[dst] = (self.reg[dst] as i32).wrapping_shr(self.reg[src] as u32) as u64 & (u32::MAX as u64),
             ebpf::LE if self.executable.get_sbpf_version().enable_le() => {
@@ -353,8 +425,22 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             },
             ebpf::XOR64_IMM  => self.reg[dst] ^= insn.imm as u64,
             ebpf::XOR64_REG  => self.reg[dst] ^= self.reg[src],
-            ebpf::MOV64_IMM  => self.reg[dst] =  insn.imm as u64,
-            ebpf::MOV64_REG  => self.reg[dst] =  self.reg[src],
+            ebpf::MOV64_IMM  => {
+                self.reg[dst] =  insn.imm as u64;
+                let tos = taint::address_mapping(dst as u64, 8);
+                for i in 0..8 {
+                    self.taint_engine.clear_taint(tos[i]);
+                }
+            },
+            ebpf::MOV64_REG  => {
+                self.reg[dst] =  self.reg[src];
+                let le_bytes_array = self.reg[src].to_le_bytes();
+                let froms = taint::address_mapping(src as u64, 8);
+                let tos = taint::address_mapping(dst as u64, 8);
+                for i in 0..8 {
+                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                }
+            },
             ebpf::ARSH64_IMM => self.reg[dst] = (self.reg[dst] as i64).wrapping_shr(insn.imm as u32)      as u64,
             ebpf::ARSH64_REG => self.reg[dst] = (self.reg[dst] as i64).wrapping_shr(self.reg[src] as u32) as u64,
             ebpf::HOR64_IMM if self.executable.get_sbpf_version().disable_lddw() => {
