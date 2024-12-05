@@ -433,6 +433,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             
             // interpreter.jump_tracer.print_trace();
             interpreter.taint_engine.save_history();
+            interpreter.taint_engine.save_instruction_compare();
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {

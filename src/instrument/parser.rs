@@ -115,6 +115,12 @@ pub enum Attribute {
     ProgramId,
 }
 
+impl Attribute {
+    pub fn is_instruction(&self) -> bool {
+        matches!(self, Attribute::Instruction { .. })
+    }
+}
+
 pub struct SemanticMapping {
     pub input: Input,
     pub mapping: HashMap<u64, Attribute>,

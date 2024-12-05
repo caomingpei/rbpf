@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::ebpf;
+use std::fmt::{self, Debug};
 use std::fs::File;
 use std::io::Write;
-use std::fmt::{self, Debug};
 
 use crate::instrument::parser::*;
 
@@ -50,10 +50,7 @@ const MM_PROGRAM_START: u64 = 0x100000000;
 #[derive(Clone)]
 enum TaintState {
     Clean,
-    Tainted {
-        source: u64,
-        color: Attribute,
-    },
+    Tainted { source: CommonAddress, color: Attribute },
 }
 
 impl Debug for TaintState {
@@ -61,7 +58,11 @@ impl Debug for TaintState {
         match self {
             TaintState::Clean => write!(f, "Clean"),
             TaintState::Tainted { source, color } => {
-                write!(f, "Tainted {{ source: {:#09x}, color: {:?} }}", source, color)
+                write!(
+                    f,
+                    "Tainted {{ source: {:#09x}, color: {:?} }}",
+                    source.address, color
+                )
             }
         }
     }
@@ -88,6 +89,7 @@ pub struct TaintEngine {
     pub state: HashMap<CommonAddress, TaintState>,
     // TODO: pub monitor: Vec<u64>, set the specific address to monitor
     pub semantic_mapping: SemanticMapping,
+    pub instruction_compare: HashMap<CommonAddress, Vec<CommonAddress>>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -114,11 +116,17 @@ pub fn address_mapping(vm_address: u64, length: u8) -> Vec<CommonAddress> {
     let mut addresses = Vec::new();
     if vm_address < MM_PROGRAM_START {
         for i in 0..length {
-            addresses.push(CommonAddress { address: vm_address, offset: i });
+            addresses.push(CommonAddress {
+                address: vm_address,
+                offset: i,
+            });
         }
     } else {
         for i in 0..length {
-            addresses.push(CommonAddress { address: vm_address + i as u64, offset: 0 });
+            addresses.push(CommonAddress {
+                address: vm_address + i as u64,
+                offset: 0,
+            });
         }
     }
     addresses
@@ -127,13 +135,31 @@ pub fn address_mapping(vm_address: u64, length: u8) -> Vec<CommonAddress> {
 impl TaintEngine {
     pub fn new(semantic_mapping: SemanticMapping) -> Self {
         // TODO: set the specific address to monitor
-        let mut memory = TaintEngine { id: 0, history: Vec::new(), state: HashMap::new(), semantic_mapping };
-        println!("Base input address is the default value: {:#018x}", INPUT_ADDRESS_U64);
+        let mut memory = TaintEngine {
+            id: 0,
+            history: Vec::new(),
+            state: HashMap::new(),
+            semantic_mapping,
+            instruction_compare: HashMap::new(),
+        };
+        println!(
+            "Base input address is the default value: {:#018x}",
+            INPUT_ADDRESS_U64
+        );
         let mapping = &memory.semantic_mapping.mapping;
         for offset in mapping.keys() {
-            let vm_address = INPUT_ADDRESS_U64 + offset;
+            let vm_address = CommonAddress {
+                address: INPUT_ADDRESS_U64 + offset,
+                offset: 0,
+            };
             let attribute = mapping[offset].clone();
-            memory.state.insert(CommonAddress { address: vm_address, offset: 0 }, TaintState::Tainted { source: vm_address, color: attribute });
+            memory.state.insert(
+                vm_address,
+                TaintState::Tainted {
+                    source: vm_address, 
+                    color: attribute,
+                },
+            );
         }
         memory
     }
@@ -143,15 +169,36 @@ impl TaintEngine {
             // Source is tainted, propagate taint
             let new_state = from_state.clone();
             self.state.insert(to.clone(), new_state.clone());
-            TaintHistory { id: self.id, from: from.clone(), to: to.clone(), value, state: new_state }
+            TaintHistory {
+                id: self.id,
+                from: from.clone(),
+                to: to.clone(),
+                value,
+                state: new_state,
+            }
         } else if self.state.contains_key(&to) {
             // Source is clean, remove taint from destination
             let clean_state = TaintState::Clean;
             self.state.remove(&to);
-            TaintHistory { id: self.id, from: from.clone(), to: to.clone(), value, state: clean_state }
+            TaintHistory {
+                id: self.id,
+                from: from.clone(),
+                to: to.clone(),
+                value,
+                state: clean_state,
+            }
         } else {
-            // Both addresses are clean, no need to record history
-            return;
+            // // Both addresses are clean, no need to record history
+            // return;
+            // record the clean state
+            let clean_state = TaintState::Clean;
+            TaintHistory {
+                id: self.id,
+                from: from.clone(),
+                to: to.clone(),
+                value,
+                state: clean_state,
+            }
         };
         self.history.push(history_entry);
         self.id += 1;
@@ -160,7 +207,10 @@ impl TaintEngine {
     pub fn show_history(&self) {
         println!("Taint history: ");
         for history in &self.history {
-            println!("{:?} -> {:?}: value[{:#02x}], {:?}", history.from, history.to, history.value, history.state);
+            println!(
+                "{:?} -> {:?}: value[{:#02x}], {:?}",
+                history.from, history.to, history.value, history.state
+            );
         }
     }
 
@@ -168,7 +218,12 @@ impl TaintEngine {
     pub fn save_history(&self) {
         let mut file = File::create("taint_history.txt").unwrap();
         for history in &self.history {
-            writeln!(file, "Id: {:?}, {:?} -> {:?}: value[{:#02x}], {:?}", history.id, history.from, history.to, history.value, history.state).unwrap();
+            writeln!(
+                file,
+                "Id: {:?}, {:?} -> {:?}: value[{:#02x}], {:?}",
+                history.id, history.from, history.to, history.value, history.state
+            )
+            .unwrap();
         }
         println!("Logs saved to taint_history.txt");
     }
@@ -184,6 +239,34 @@ impl TaintEngine {
     pub fn clear_taint(&mut self, address: CommonAddress) {
         if let Some(state) = self.state.get(&address) {
             self.state.remove(&address);
+        }
+    }
+
+    /// Get the source address of the instruction taint,
+    /// return None if no instruction taint
+    pub fn get_if_instruction_taints(&self) -> Vec<(CommonAddress, CommonAddress)> {
+        let mut tainted_addrs = Vec::new();
+        for (address, state) in self.state.iter() {
+            if let TaintState::Tainted { source, color } = state.clone() {
+                if color.is_instruction() {
+                    tainted_addrs.push((address.clone(), source.clone()))
+                }
+            }
+        }
+        tainted_addrs
+    }
+
+    pub fn save_instruction_compare(&self) {
+        let mut file = File::create("taint_instruction_compare.txt").unwrap();
+        for (insn_id, taint_addrs) in &self.instruction_compare {
+            for taint_addr in taint_addrs {
+                writeln!(
+                    file,
+                    "Instruction id: {:?}, taint addresses: {:?}",
+                    insn_id, taint_addr
+                )
+                .unwrap();
+            }
         }
     }
 }

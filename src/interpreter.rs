@@ -523,8 +523,66 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
 
             // BPF_JMP class
             ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JEQ_IMM    => if  self.reg[dst] == insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JEQ_REG    => if  self.reg[dst] == self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JEQ_IMM    => {
+                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                for addr in dst_tainted_addrs {
+                    println!("dst_tainted_addr: {:?}", addr);
+                    println!("tainted_addrs: {:?}", tainted_addrs);
+                    for (tainted_addr, source) in &tainted_addrs {
+                        if *tainted_addr == addr {
+                            let to_addrs = taint::address_mapping(insn.imm as u64, 8);
+                            for to_addr in to_addrs {
+                                self.taint_engine.instruction_compare
+                                    .entry(*source)
+                                    .or_insert_with(Vec::new)
+                                    .push(to_addr);
+                            }
+                        }
+                    }
+                }
+                if self.reg[dst] == insn.imm as u64 { 
+                    let target = (next_pc as i64 + insn.off as i64) as u64; 
+                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    next_pc = target; 
+                }
+            },
+            ebpf::JEQ_REG    => {
+                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                let src_tainted_addrs = taint::address_mapping(self.reg[src] as u64, 8);
+                for addr in dst_tainted_addrs {
+                    for (tainted_addr, source) in &tainted_addrs {
+                        if *tainted_addr == addr {
+                            let to_addrs = taint::address_mapping(self.reg[src] as u64, 8);
+                            for to_addr in to_addrs {
+                                self.taint_engine.instruction_compare
+                                    .entry(*source)
+                                    .or_insert_with(Vec::new)
+                                    .push(to_addr);
+                            }
+                        }
+                    }
+                }
+                for addr in src_tainted_addrs {
+                    for (tainted_addr, source) in &tainted_addrs {
+                        if *tainted_addr == addr {
+                            let to_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                            for to_addr in to_addrs {
+                                self.taint_engine.instruction_compare
+                                    .entry(*source)
+                                    .or_insert_with(Vec::new)
+                                    .push(to_addr);
+                            }
+                        }
+                    }
+                }
+                if  self.reg[dst] == self.reg[src] { 
+                    let target = (next_pc as i64 + insn.off as i64) as u64; 
+                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    next_pc = target; 
+                }
+            },
             ebpf::JGT_IMM    => if  self.reg[dst] >  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JGT_REG    => if  self.reg[dst] >  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JGE_IMM    => if  self.reg[dst] >= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
@@ -535,8 +593,64 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JLE_REG    => if  self.reg[dst] <= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
             ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JNE_IMM    => if  self.reg[dst] != insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JNE_REG    => if  self.reg[dst] != self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JNE_IMM    => {
+                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                for addr in dst_tainted_addrs {
+                    for (tainted_addr, source) in &tainted_addrs {
+                        if *tainted_addr == addr {
+                            let to_addrs = taint::address_mapping(insn.imm as u64, 8);
+                            for to_addr in to_addrs {
+                                self.taint_engine.instruction_compare
+                                    .entry(*source)
+                                    .or_insert_with(Vec::new)
+                                    .push(to_addr);
+                            }
+                        }
+                    }
+                }
+                if  self.reg[dst] != insn.imm as u64 { 
+                    let target = (next_pc as i64 + insn.off as i64) as u64; 
+                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    next_pc = target; 
+                }
+            },
+            ebpf::JNE_REG    => {
+                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                let src_tainted_addrs = taint::address_mapping(self.reg[src] as u64, 8);
+                for addr in dst_tainted_addrs {
+                    for (tainted_addr, source) in &tainted_addrs {
+                        if *tainted_addr == addr {
+                            let to_addrs = taint::address_mapping(self.reg[src] as u64, 8);
+                            for to_addr in to_addrs {
+                                self.taint_engine.instruction_compare
+                                    .entry(*source)
+                                .or_insert_with(Vec::new)
+                                    .push(to_addr);
+                            }
+                        }
+                    }
+                }
+                for addr in src_tainted_addrs {
+                    for (tainted_addr, source) in &tainted_addrs {
+                        if *tainted_addr == addr {
+                            let to_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                            for to_addr in to_addrs {
+                                self.taint_engine.instruction_compare
+                                    .entry(*source)
+                                    .or_insert_with(Vec::new)
+                                    .push(to_addr);
+                            }
+                        }
+                    }
+                }
+                if  self.reg[dst] != self.reg[src]                { 
+                    let target = (next_pc as i64 + insn.off as i64) as u64; 
+                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    next_pc = target; 
+                }
+            },
             ebpf::JSGT_IMM   => if (self.reg[dst] as i64) >  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JSGT_REG   => if (self.reg[dst] as i64) >  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
             ebpf::JSGE_IMM   => if (self.reg[dst] as i64) >= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
