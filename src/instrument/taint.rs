@@ -48,9 +48,12 @@ const MM_PROGRAM_START: u64 = 0x100000000;
 
 /// Type of the taint state
 #[derive(Clone)]
-enum TaintState {
+pub enum TaintState {
     Clean,
-    Tainted { source: CommonAddress, color: Attribute },
+    Tainted {
+        source: CommonAddress,
+        color: Attribute,
+    },
 }
 
 impl Debug for TaintState {
@@ -76,6 +79,7 @@ impl Debug for TaintState {
 #[derive(Debug)]
 struct TaintHistory {
     id: u64,
+    opcode: u8,
     from: CommonAddress,
     to: CommonAddress,
     value: u8,
@@ -84,12 +88,12 @@ struct TaintHistory {
 
 /// Memory struct to record the taint state of the memory
 pub struct TaintEngine {
-    id: u64,
     pub history: Vec<TaintHistory>,
     pub state: HashMap<CommonAddress, TaintState>,
     // TODO: pub monitor: Vec<u64>, set the specific address to monitor
     pub semantic_mapping: SemanticMapping,
-    pub instruction_compare: HashMap<CommonAddress, Vec<CommonAddress>>,
+    pub instruction_compare: HashMap<CommonAddress, Vec<u64>>,
+    pub log: Vec<String>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -136,11 +140,11 @@ impl TaintEngine {
     pub fn new(semantic_mapping: SemanticMapping) -> Self {
         // TODO: set the specific address to monitor
         let mut memory = TaintEngine {
-            id: 0,
             history: Vec::new(),
             state: HashMap::new(),
             semantic_mapping,
             instruction_compare: HashMap::new(),
+            log: Vec::new(),
         };
         println!(
             "Base input address is the default value: {:#018x}",
@@ -156,7 +160,7 @@ impl TaintEngine {
             memory.state.insert(
                 vm_address,
                 TaintState::Tainted {
-                    source: vm_address, 
+                    source: vm_address,
                     color: attribute,
                 },
             );
@@ -164,13 +168,50 @@ impl TaintEngine {
         memory
     }
 
-    pub fn propagate(&mut self, from: CommonAddress, to: CommonAddress, value: u8) {
+    pub fn propagate(
+        &mut self,
+        ptr_addr: u64,
+        opcode: u8,
+        from: CommonAddress,
+        to: CommonAddress,
+        value: u8,
+    ) {
         let history_entry = if let Some(from_state) = self.state.get(&from) {
             // Source is tainted, propagate taint
             let new_state = from_state.clone();
             self.state.insert(to.clone(), new_state.clone());
+            // match &new_state {
+            //     TaintState::Tainted { source, color } => {
+            //         if source.address == 0x4000050d0 {
+            //             println!("Reach Instruction: from: {:?}, to: {:?}, source:{:?} color:{:?}", from, to, source, color);
+            //             // for (k, v) in self.state.iter() {
+            //             //     if k.address < 0x400000000 {
+            //             //         println!("  Key: addr={:#x} offset={}, Value: {:?}", k.address, k.offset, v);
+            //             //     }
+            //             // }
+
+            //             match self.state.get(&to) {
+            //                 Some(state) => {
+            //                     println!("DEBUG: Found state: {:?}", state);
+            //                     println!("ptr: {:#09x}, to: {:?}: state: {:?}",
+            //                             ptr_addr, to, state);
+            //                 }
+            //                 None => {
+            //                     println!("DEBUG: No state found for to={:?}", to);
+            //                     println!("DEBUG: Current state keys:");
+            //                     for k in self.state.keys() {
+            //                         println!("  {:?}", k);
+            //                     }
+            //                 }
+            //             }
+            //             println!("DEBUG: Finished processing");
+            //         }
+            //     }
+            //     _ => {}
+            // }
             TaintHistory {
-                id: self.id,
+                id: ptr_addr,
+                opcode: opcode,
                 from: from.clone(),
                 to: to.clone(),
                 value,
@@ -181,7 +222,8 @@ impl TaintEngine {
             let clean_state = TaintState::Clean;
             self.state.remove(&to);
             TaintHistory {
-                id: self.id,
+                id: ptr_addr,
+                opcode: opcode,
                 from: from.clone(),
                 to: to.clone(),
                 value,
@@ -193,7 +235,8 @@ impl TaintEngine {
             // record the clean state
             let clean_state = TaintState::Clean;
             TaintHistory {
-                id: self.id,
+                id: ptr_addr,
+                opcode: opcode,
                 from: from.clone(),
                 to: to.clone(),
                 value,
@@ -201,7 +244,6 @@ impl TaintEngine {
             }
         };
         self.history.push(history_entry);
-        self.id += 1;
     }
 
     pub fn show_history(&self) {
@@ -220,20 +262,12 @@ impl TaintEngine {
         for history in &self.history {
             writeln!(
                 file,
-                "Id: {:?}, {:?} -> {:?}: value[{:#02x}], {:?}",
-                history.id, history.from, history.to, history.value, history.state
+                "{:#09x}: Insn: {:#02x}, {:?} -> {:?}: value[{:#02x}], {:?}",
+                history.id, history.opcode, history.from, history.to, history.value, history.state
             )
             .unwrap();
         }
         println!("Logs saved to taint_history.txt");
-    }
-
-    pub fn get_taint_state(&self, address: CommonAddress) -> TaintState {
-        if let Some(state) = self.state.get(&address) {
-            state.clone()
-        } else {
-            TaintState::Clean
-        }
     }
 
     pub fn clear_taint(&mut self, address: CommonAddress) {
@@ -246,10 +280,13 @@ impl TaintEngine {
     /// return None if no instruction taint
     pub fn get_if_instruction_taints(&self) -> Vec<(CommonAddress, CommonAddress)> {
         let mut tainted_addrs = Vec::new();
-        for (address, state) in self.state.iter() {
-            if let TaintState::Tainted { source, color } = state.clone() {
-                if color.is_instruction() {
-                    tainted_addrs.push((address.clone(), source.clone()))
+        for (address, taint_value) in self.state.iter() {
+            if let TaintState::Tainted { source, color } = taint_value.clone() {
+                match color {
+                    Attribute::Instruction { index: _ } => {
+                        tainted_addrs.push((address.clone(), source.clone()))
+                    }
+                    _ => {}
                 }
             }
         }
@@ -258,15 +295,22 @@ impl TaintEngine {
 
     pub fn save_instruction_compare(&self) {
         let mut file = File::create("taint_instruction_compare.txt").unwrap();
-        for (insn_id, taint_addrs) in &self.instruction_compare {
-            for taint_addr in taint_addrs {
+        for (insn_id, compare_vals) in &self.instruction_compare {
+            for compare_val in compare_vals {
                 writeln!(
                     file,
-                    "Instruction id: {:?}, taint addresses: {:?}",
-                    insn_id, taint_addr
+                    "Instruction id: {:?}, compare value: {:?}",
+                    insn_id, compare_val
                 )
                 .unwrap();
             }
+        }
+    }
+
+    pub fn save_log(&self) {
+        let mut file = File::create("taint_running.txt").unwrap();
+        for log in &self.log {
+            writeln!(file, "{}", log).unwrap();
         }
     }
 }

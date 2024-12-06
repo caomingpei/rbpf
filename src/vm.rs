@@ -367,7 +367,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
     }
 
     /// Parse the input state from memory
-    /// 
+    ///
     /// Returns the semantic mapping of the input state
     /// Test Case:
     /// let account_number = memory_mapping.load::<u64>(crate::instrument::parser::INPUT_ADDRESS_U64);
@@ -381,7 +381,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             match memory_mapping.load::<u8>(parser::INPUT_ADDRESS_U64 + i as u64) {
                 ProgramResult::Ok(byte) => {
                     input_bytes[i] = byte as u8;
-                },
+                }
                 ProgramResult::Err(e) => break,
             }
         }
@@ -421,7 +421,8 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             let mut jump_tracer = JumpTracer::new();
             #[cfg(feature = "debugger")]
             let debug_port = self.debug_port.clone();
-            let mut interpreter = Interpreter::new(self, executable, self.registers, jump_tracer, taint_engine);
+            let mut interpreter =
+                Interpreter::new(self, executable, self.registers, jump_tracer, taint_engine);
             #[cfg(feature = "debugger")]
             if let Some(debug_port) = debug_port {
                 crate::debugger::execute(&mut interpreter, debug_port);
@@ -430,8 +431,9 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             }
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
-            
+
             // interpreter.jump_tracer.print_trace();
+            interpreter.taint_engine.save_log();
             interpreter.taint_engine.save_history();
             interpreter.taint_engine.save_instruction_compare();
         } else {

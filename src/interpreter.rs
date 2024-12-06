@@ -212,7 +212,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 1);
                 let tos = taint::address_mapping(dst as u64, 1);
                 for i in 0..1 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_H_REG   => {
@@ -222,7 +222,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 2);
                 let tos = taint::address_mapping(dst as u64, 2);
                 for i in 0..2 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_W_REG   => {
@@ -232,7 +232,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 4);
                 let tos = taint::address_mapping(dst as u64, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_DW_REG  => {
@@ -242,7 +242,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 8);
                 let tos = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
 
@@ -288,7 +288,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 1);
                 let tos = taint::address_mapping(vm_addr, 1);
                 for i in 0..1 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ST_H_REG   => {
@@ -298,7 +298,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 2);
                 let tos = taint::address_mapping(vm_addr, 2);
                 for i in 0..2 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ST_W_REG   => {
@@ -308,7 +308,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 4);
                 let tos = taint::address_mapping(vm_addr, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ST_DW_REG  => {
@@ -318,7 +318,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 8);
                 let tos = taint::address_mapping(vm_addr, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
 
@@ -367,7 +367,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 4);
                 let tos = taint::address_mapping(dst as u64, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ARSH32_IMM => self.reg[dst] = (self.reg[dst] as i32).wrapping_shr(insn.imm as u32)      as u64 & (u32::MAX as u64),
@@ -438,7 +438,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 8);
                 let tos = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate(froms[i], tos[i], le_bytes_array[i]);
+                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 +parser::TEXT_START_U64, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ARSH64_IMM => self.reg[dst] = (self.reg[dst] as i64).wrapping_shr(insn.imm as u32)      as u64,
@@ -523,57 +523,52 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
 
             // BPF_JMP class
             ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JEQ_IMM    => {
+            ebpf::JEQ_IMM => {
                 let tainted_addrs = self.taint_engine.get_if_instruction_taints();
-                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                // self.reg[dst] is the address of the destination register, change to dst
+                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 for addr in dst_tainted_addrs {
-                    println!("dst_tainted_addr: {:?}", addr);
-                    println!("tainted_addrs: {:?}", tainted_addrs);
+                    let imm_ptr = (insn.ptr * ebpf::INSN_SIZE) as u64 + parser::TEXT_START_U64;
+                    self.taint_engine.log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            let to_addrs = taint::address_mapping(insn.imm as u64, 8);
-                            for to_addr in to_addrs {
-                                self.taint_engine.instruction_compare
-                                    .entry(*source)
-                                    .or_insert_with(Vec::new)
-                                    .push(to_addr);
-                            }
+                            println!("DEBUG: Match found! Adding imm value: {:#x}", insn.imm);
+                            self.taint_engine.instruction_compare
+                                .entry(*source)
+                                .or_insert_with(Vec::new)
+                                .push(insn.imm as u64);
                         }
                     }
                 }
-                if self.reg[dst] == insn.imm as u64 { 
-                    let target = (next_pc as i64 + insn.off as i64) as u64; 
-                    trace_jump!(self.jump_tracer, next_pc, target, true); 
-                    next_pc = target; 
+                
+                if self.reg[dst] == insn.imm as u64 {
+                    let target = (next_pc as i64 + insn.off as i64) as u64;
+                    trace_jump!(self.jump_tracer, next_pc, target, true);
+                    next_pc = target;
                 }
             },
             ebpf::JEQ_REG    => {
                 let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                // TODO: dst reg[dst] need to think more
                 let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
                 let src_tainted_addrs = taint::address_mapping(self.reg[src] as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            let to_addrs = taint::address_mapping(self.reg[src] as u64, 8);
-                            for to_addr in to_addrs {
-                                self.taint_engine.instruction_compare
-                                    .entry(*source)
-                                    .or_insert_with(Vec::new)
-                                    .push(to_addr);
-                            }
+                            self.taint_engine.instruction_compare
+                                .entry(*source)
+                                .or_insert_with(Vec::new)
+                                .push(self.reg[src]);
                         }
                     }
                 }
                 for addr in src_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            let to_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
-                            for to_addr in to_addrs {
-                                self.taint_engine.instruction_compare
-                                    .entry(*source)
-                                    .or_insert_with(Vec::new)
-                                    .push(to_addr);
-                            }
+                            self.taint_engine.instruction_compare
+                                .entry(*source)
+                                .or_insert_with(Vec::new)
+                                .push(self.reg[dst]);
                         }
                     }
                 }
@@ -595,17 +590,15 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JNE_IMM    => {
                 let tainted_addrs = self.taint_engine.get_if_instruction_taints();
-                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
+                // TODO: dst reg[dst] need to think more
+                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            let to_addrs = taint::address_mapping(insn.imm as u64, 8);
-                            for to_addr in to_addrs {
-                                self.taint_engine.instruction_compare
-                                    .entry(*source)
-                                    .or_insert_with(Vec::new)
-                                    .push(to_addr);
-                            }
+                            self.taint_engine.instruction_compare
+                                .entry(*source)
+                                .or_insert_with(Vec::new)
+                                .push(insn.imm as u64);
                         }
                     }
                 }
@@ -617,31 +610,26 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             },
             ebpf::JNE_REG    => {
                 let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                // TODO: dst reg[dst] need to think more
                 let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
                 let src_tainted_addrs = taint::address_mapping(self.reg[src] as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            let to_addrs = taint::address_mapping(self.reg[src] as u64, 8);
-                            for to_addr in to_addrs {
-                                self.taint_engine.instruction_compare
-                                    .entry(*source)
+                            self.taint_engine.instruction_compare
+                                .entry(*source)
                                 .or_insert_with(Vec::new)
-                                    .push(to_addr);
-                            }
+                                .push(self.reg[src]);
                         }
                     }
                 }
                 for addr in src_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            let to_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
-                            for to_addr in to_addrs {
-                                self.taint_engine.instruction_compare
-                                    .entry(*source)
-                                    .or_insert_with(Vec::new)
-                                    .push(to_addr);
-                            }
+                            self.taint_engine.instruction_compare
+                                .entry(*source)
+                                .or_insert_with(Vec::new)
+                                .push(self.reg[dst]);
                         }
                     }
                 }

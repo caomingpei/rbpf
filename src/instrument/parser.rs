@@ -6,6 +6,7 @@ use std::cmp::max;
 /// Solana eBPF input message start address
 /// Input message size is 32KB
 /// END address is 0x400008000
+pub const TEXT_START_U64: u64 = 0x100000120;
 pub const INPUT_ADDRESS_U64: u64 = 0x400000000;
 pub const INPUT_MAX_SIZE: usize = 0x8000;
 pub const INPUT_END_U64: u64 = INPUT_ADDRESS_U64 + INPUT_MAX_SIZE as u64;
@@ -113,12 +114,6 @@ pub enum Attribute {
     NumberInstruction,
     Instruction {index: u64},
     ProgramId,
-}
-
-impl Attribute {
-    pub fn is_instruction(&self) -> bool {
-        matches!(self, Attribute::Instruction { .. })
-    }
 }
 
 pub struct SemanticMapping {
