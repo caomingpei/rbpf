@@ -17,17 +17,24 @@ pub enum AccountType {
     Duplicate = 0x08,
 }
 
+/// The Input Struct
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct Input {
+    /// The number of accounts
     pub account_number: [u8; 8],
+    /// The accounts, dynamically allocated
     pub accounts: Box<[AccountInfo]>,
+    /// The number of instructions
     pub instruction_number: [u8; 8],
+    /// The instructions, dynamically allocated
     pub instructions: Box<[u8]>,
+    /// The program id
     pub program_id: [u8; 32],
 }
 
 impl Input {
+    /// Create a new input struct
     pub fn new(account_number: u64, instruction_number: u64) -> Self {
         Self {
             account_number: account_number.to_le_bytes().try_into().unwrap(),
@@ -42,16 +49,27 @@ impl Input {
 /// Normal account info struct
 #[derive(Clone, Copy)]
 pub struct AccountInfo {
+    /// The duplicate flag, 0xff means not duplicated, otherwise indicate the account index number
     pub duplicate: u8,
+    /// Whether the account is a signer
     pub is_signer: bool,
+    /// Whether the account is writable
     pub is_writable: bool,
+    /// Whether the account is executable
     pub is_executable: bool,
+    /// Padding for the account
     pub padding: [u8; 4],
+    /// The pubkey of the account
     pub pubkey: [u8; 32],
-    pub owner_pubkey: [u8; 32],
+    /// The owner pubkey of the account
+    pub owner_pubkey: [u8;32],
+    /// The lamports of the account
     pub lamports: [u8; 8],
+    /// The data length of the account
     pub data_len: [u8; 8],
+    /// The data of the account
     pub data: [u8; 10240], // 10K Padding for the account data (program data maximum size)
+    /// The rent epoch of the account
     pub rent_epoch: [u8; 8],
 }
 
@@ -91,37 +109,46 @@ where
 
 
 
-/// Attribute of the Input
-/// NumberAccount: The number of accounts in the instruction
-/// Account: the account info, info include:
-/// - duplicate: the duplicate flag of the account
-/// - is_signer: the signer flag of the account
-/// - is_writable: the writable flag of the account
-/// - is_account: the account flag of the account
-/// - pubkey: the pubkey of the account
-/// - owner_pubkey: the owner pubkey of the account
-/// - lamports: the lamports of the account
-/// - data_len: the data length of the account
-/// - data: the data of the account
-/// - rent_epoch: the rent epoch of the account
-/// NumberInstruction: The number of instructions in the instruction
-/// Instruction: the instruction info
-/// ProgramId: The program id in the instruction
+/// Attribute of the Input, Used for semantic mapping from Input to Running.
 #[derive(Clone, Debug)]
 pub enum Attribute {
+    /// NumberAccount: The number of accounts in the instruction
     NumberAccount,
-    Account {index: u64, info: String},
+    /// Account: the account info, info include:
+    /// - duplicate: the duplicate flag of the account
+    /// - is_signer: the signer flag of the account
+    /// - is_writable: the writable flag of the account
+    /// - is_account: the account flag of the account
+    /// - pubkey: the pubkey of the account
+    /// - owner_pubkey: the owner pubkey of the account
+    /// - lamports: the lamports of the account
+    Account {
+        /// The index of the account in the input
+        index: u64, 
+        /// The info of the account
+        info: String
+    },
+    /// NumberInstruction: The number of instructions in the instruction
     NumberInstruction,
-    Instruction {index: u64},
+    /// Instruction: the instruction info
+    Instruction {
+        /// The index of the instruction in the input
+        index: u64
+    },
+    /// ProgramId: The program id in the instruction
     ProgramId,
 }
 
+/// The semantic mapping struct
 pub struct SemanticMapping {
+    /// The input struct
     pub input: Input,
+    /// The mapping from the input to the attribute
     pub mapping: HashMap<u64, Attribute>,
 }
 
 impl SemanticMapping {
+    /// Create a new semantic mapping struct
     pub fn new(input: Input, mapping: HashMap<u64, Attribute>) -> Self {
         Self {
             input,
@@ -130,6 +157,7 @@ impl SemanticMapping {
     }
 }
 
+/// Parse the account from the input
 fn parse_account(input: &[u8], ptr: &mut usize, idx: u64, mapping: &mut HashMap<u64, Attribute>) -> AccountInfo {
     let mut account = AccountInfo::default();
     account.duplicate = convert_bytes_to_num::<u8>(&input[0..1]);
