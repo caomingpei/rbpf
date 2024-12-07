@@ -5,6 +5,7 @@ use std::fmt::{self, Debug};
 use std::fs::File;
 use std::io::Write;
 
+use crate::instrument::log::{LogLevel, TaintLog};
 use crate::instrument::parser::*;
 
 const MM_PROGRAM_START: u64 = 0x100000000;
@@ -93,7 +94,8 @@ pub struct TaintEngine {
     // TODO: pub monitor: Vec<u64>, set the specific address to monitor
     pub semantic_mapping: SemanticMapping,
     pub instruction_compare: HashMap<CommonAddress, Vec<u64>>,
-    pub log: Vec<String>,
+    pub logger: TaintLog,
+    pub other_log: Vec<String>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -144,7 +146,8 @@ impl TaintEngine {
             state: HashMap::new(),
             semantic_mapping,
             instruction_compare: HashMap::new(),
-            log: Vec::new(),
+            logger: TaintLog::new("taint_log.txt").unwrap(),
+            other_log: Vec::new(),
         };
         println!(
             "Base input address is the default value: {:#018x}",
@@ -180,35 +183,6 @@ impl TaintEngine {
             // Source is tainted, propagate taint
             let new_state = from_state.clone();
             self.state.insert(to.clone(), new_state.clone());
-            // match &new_state {
-            //     TaintState::Tainted { source, color } => {
-            //         if source.address == 0x4000050d0 {
-            //             println!("Reach Instruction: from: {:?}, to: {:?}, source:{:?} color:{:?}", from, to, source, color);
-            //             // for (k, v) in self.state.iter() {
-            //             //     if k.address < 0x400000000 {
-            //             //         println!("  Key: addr={:#x} offset={}, Value: {:?}", k.address, k.offset, v);
-            //             //     }
-            //             // }
-
-            //             match self.state.get(&to) {
-            //                 Some(state) => {
-            //                     println!("DEBUG: Found state: {:?}", state);
-            //                     println!("ptr: {:#09x}, to: {:?}: state: {:?}",
-            //                             ptr_addr, to, state);
-            //                 }
-            //                 None => {
-            //                     println!("DEBUG: No state found for to={:?}", to);
-            //                     println!("DEBUG: Current state keys:");
-            //                     for k in self.state.keys() {
-            //                         println!("  {:?}", k);
-            //                     }
-            //                 }
-            //             }
-            //             println!("DEBUG: Finished processing");
-            //         }
-            //     }
-            //     _ => {}
-            // }
             TaintHistory {
                 id: ptr_addr,
                 opcode: opcode,
@@ -246,30 +220,6 @@ impl TaintEngine {
         self.history.push(history_entry);
     }
 
-    pub fn show_history(&self) {
-        println!("Taint history: ");
-        for history in &self.history {
-            println!(
-                "{:?} -> {:?}: value[{:#02x}], {:?}",
-                history.from, history.to, history.value, history.state
-            );
-        }
-    }
-
-    /// Save the taint history to the file
-    pub fn save_history(&self) {
-        let mut file = File::create("taint_history.txt").unwrap();
-        for history in &self.history {
-            writeln!(
-                file,
-                "{:#09x}: Insn: {:#02x}, {:?} -> {:?}: value[{:#02x}], {:?}",
-                history.id, history.opcode, history.from, history.to, history.value, history.state
-            )
-            .unwrap();
-        }
-        println!("Logs saved to taint_history.txt");
-    }
-
     pub fn clear_taint(&mut self, address: CommonAddress) {
         if let Some(state) = self.state.get(&address) {
             self.state.remove(&address);
@@ -293,24 +243,39 @@ impl TaintEngine {
         tainted_addrs
     }
 
-    pub fn save_instruction_compare(&self) {
-        let mut file = File::create("taint_instruction_compare.txt").unwrap();
-        for (insn_id, compare_vals) in &self.instruction_compare {
-            for compare_val in compare_vals {
-                writeln!(
-                    file,
-                    "Instruction id: {:?}, compare value: {:?}",
-                    insn_id, compare_val
-                )
-                .unwrap();
-            }
+    /// Save the taint history and instruction and others compare to the file
+    pub fn save_log(&mut self) {
+        self.logger.log(LogLevel::Critical, &format!("---------Taint History---------")).unwrap();
+        self.save_history();
+        self.logger.log(LogLevel::Critical, &format!("-----------------------------------")).unwrap();
+        self.logger.log(LogLevel::Critical, &format!("---------Instruction Compare---------")).unwrap();
+        self.save_instruction_compare();
+        self.logger.log(LogLevel::Critical, &format!("-----------------------------------")).unwrap();
+        self.logger.log(LogLevel::Critical, &format!("---------Other Log---------")).unwrap();
+        for log in &self.other_log {
+            self.logger.log(LogLevel::Info, &format!("{}", log)).unwrap();
+        }
+        self.logger.log(LogLevel::Critical, &format!("-----------------------------------")).unwrap();
+    }
+
+    /// Save the taint history to the file
+    fn save_history(&mut self) {
+        for history in &self.history {
+            self.logger.log(LogLevel::Info, &format!(
+                "{:#09x}: Insn: {:#02x}, {:?} -> {:?}: value[{:#02x}], {:?}",
+                history.id, history.opcode, history.from, history.to, history.value, history.state
+            )).unwrap();
         }
     }
 
-    pub fn save_log(&self) {
-        let mut file = File::create("taint_running.txt").unwrap();
-        for log in &self.log {
-            writeln!(file, "{}", log).unwrap();
+    fn save_instruction_compare(&mut self) {
+        for (insn_id, compare_vals) in &self.instruction_compare {
+            for compare_val in compare_vals {
+                self.logger.log(LogLevel::Info, &format!(
+                    "Instruction id: {:?}, compare value: {:?}",
+                    insn_id, compare_val
+                )).unwrap();
+            }
         }
     }
 }
