@@ -550,8 +550,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JEQ_REG    => {
                 let tainted_addrs = self.taint_engine.get_if_instruction_taints();
                 // TODO: dst reg[dst] need to think more
-                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
-                let src_tainted_addrs = taint::address_mapping(self.reg[src] as u64, 8);
+                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
+                let src_tainted_addrs = taint::address_mapping(src as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
@@ -611,8 +611,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JNE_REG    => {
                 let tainted_addrs = self.taint_engine.get_if_instruction_taints();
                 // TODO: dst reg[dst] need to think more
-                let dst_tainted_addrs = taint::address_mapping(self.reg[dst] as u64, 8);
-                let src_tainted_addrs = taint::address_mapping(self.reg[src] as u64, 8);
+                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
+                let src_tainted_addrs = taint::address_mapping(src as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
