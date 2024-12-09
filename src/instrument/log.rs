@@ -109,7 +109,6 @@ impl Logger for ConsoleLogger {
     }
 }
 
-
 pub struct TaintLog {
     logger: FileLogger,
     console: ConsoleLogger,

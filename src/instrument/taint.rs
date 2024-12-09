@@ -1,51 +1,20 @@
-use std::collections::HashMap;
-
-use crate::ebpf;
-use std::fmt::{self, Debug};
-use std::fs::File;
-use std::io::Write;
+use memmap2::{MmapMut, MmapOptions};
+use serde::{Deserialize, Serialize};
+use serde_json;
+use std::error::Error;
+use std::{
+    collections::HashMap,
+    fmt::{self, Debug},
+    fs::{File, OpenOptions},
+    os::unix,
+};
+use bincode;
 
 use crate::instrument::log::{LogLevel, TaintLog};
 use crate::instrument::parser::*;
 
+const SHM_PATH: &str = "/tmp/NovaFuzzer_memory";
 const MM_PROGRAM_START: u64 = 0x100000000;
-
-// /// Log to store the instruction execution and value
-// #[derive(Debug)]
-// pub struct Log{
-//     vm_address: u64,
-//     value: u64,
-//     insn: ebpf::Insn,
-// }
-
-// /// A Logs vector to store logs during the execution
-// #[derive(Debug, Default)]
-// pub struct LoadLogs{
-//     logs: Vec<Log>,
-// }
-
-// /// Implementation of the LoadLogs struct
-// impl LoadLogs{
-
-//     /// Create a new LoadLogs struct
-//     pub fn new() -> Self {
-//         LoadLogs { logs: Vec::new() }
-//     }
-//     /// Insert a log into the LoadLogs struct
-//     pub fn insert(&mut self, insn: ebpf::Insn, vm_address: u64, value: u64) {
-//         self.logs.push(Log { insn: insn, vm_address, value });
-//     }
-//     /// Show the logs
-//     /// save to the log file
-//     pub fn show(&self) {
-//         let mut file = File::create("load_logs.txt").unwrap();
-//         for log in &self.logs {
-//             writeln!(file, "Instruction: {:?}", log.insn).unwrap();
-//             writeln!(file, "Load: {:#018x} -> {:#018x}", log.vm_address, log.value).unwrap();
-//         }
-//         println!("Logs saved to load_logs.txt");
-//     }
-// }
 
 /// Type of the taint state
 #[derive(Clone)]
@@ -98,7 +67,12 @@ pub struct TaintEngine {
     pub other_log: Vec<String>,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializableData {
+    instruction_compare: HashMap<CommonAddress, Vec<u64>>,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct CommonAddress {
     pub address: u64,
     pub offset: u8,
@@ -248,38 +222,115 @@ impl TaintEngine {
         tainted_addrs
     }
 
+    /// Pass the memory to the shared memory
+    pub fn pass_memory(&mut self, data: SerializableData) -> Result<(), Box<dyn Error>> {
+        let serialized_data = bincode::serialize(&data)?;
+        let shm_size = serialized_data.len();
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(SHM_PATH)?;
+
+        file.set_len(shm_size as u64)?;
+        let mut mmap = unsafe { MmapOptions::new().len(shm_size).map_mut(&file)? };
+
+        mmap[..serialized_data.len()].copy_from_slice(&serialized_data);
+        println!("Debug: File created at {}", SHM_PATH);  // 添加此行
+        println!("Debug: Data size: {}", shm_size);       // 添加此行
+        Ok(())
+    }
+
     /// Save the taint history and instruction and others compare to the file
-    pub fn save_log(&mut self) {
-        self.logger.log(LogLevel::Critical, &format!("---------Taint History---------")).unwrap();
-        self.save_history();
-        self.logger.log(LogLevel::Critical, &format!("-----------------------------------")).unwrap();
-        self.logger.log(LogLevel::Critical, &format!("---------Instruction Compare---------")).unwrap();
-        self.save_instruction_compare();
-        self.logger.log(LogLevel::Critical, &format!("-----------------------------------")).unwrap();
-        self.logger.log(LogLevel::Critical, &format!("---------Other Log---------")).unwrap();
-        for log in &self.other_log {
-            self.logger.log(LogLevel::Info, &format!("{}", log)).unwrap();
+    pub fn save_log(&mut self) -> Result<(), Box<dyn Error>> {
+        println!("Debug: Saving log");
+
+        let instruction_serializable = SerializableData {
+            instruction_compare: self.instruction_compare.clone(),
+        };
+        println!("Debug: Data prepared");
+        
+        match self.pass_memory(instruction_serializable) {
+            Ok(_) => println!("Debug: Pass memory successful"),
+            Err(e) => println!("Debug: Pass memory failed: {}", e),
         }
-        self.logger.log(LogLevel::Critical, &format!("-----------------------------------")).unwrap();
+        
+        self.logger
+            .log(
+                LogLevel::Critical,
+                &format!("---------Taint History---------"),
+            )
+            .unwrap();
+        self.save_history();
+        self.logger
+            .log(
+                LogLevel::Critical,
+                &format!("-----------------------------------"),
+            )
+            .unwrap();
+        self.logger
+            .log(
+                LogLevel::Critical,
+                &format!("---------Instruction Compare---------"),
+            )
+            .unwrap();
+        self.save_instruction_compare();
+        self.logger
+            .log(
+                LogLevel::Critical,
+                &format!("-----------------------------------"),
+            )
+            .unwrap();
+        self.logger
+            .log(LogLevel::Critical, &format!("---------Other Log---------"))
+            .unwrap();
+        for log in &self.other_log {
+            self.logger
+                .log(LogLevel::Info, &format!("{}", log))
+                .unwrap();
+        }
+        self.logger
+            .log(
+                LogLevel::Critical,
+                &format!("-----------------------------------"),
+            )
+            .unwrap();
+        Ok(())
     }
 
     /// Save the taint history to the file
     fn save_history(&mut self) {
         for history in &self.history {
-            self.logger.log(LogLevel::Info, &format!(
-                "{:#09x}: Insn: {:#02x}, {:?} -> {:?}: value[{:#02x}], {:?}",
-                history.id, history.opcode, history.from, history.to, history.value, history.state
-            )).unwrap();
+            self.logger
+                .log(
+                    LogLevel::Info,
+                    &format!(
+                        "{:#09x}: Insn: {:#02x}, {:?} -> {:?}: value[{:#02x}], {:?}",
+                        history.id,
+                        history.opcode,
+                        history.from,
+                        history.to,
+                        history.value,
+                        history.state
+                    ),
+                )
+                .unwrap();
         }
     }
 
     fn save_instruction_compare(&mut self) {
         for (insn_id, compare_vals) in &self.instruction_compare {
             for compare_val in compare_vals {
-                self.logger.log(LogLevel::Info, &format!(
-                    "Instruction id: {:?}, compare value: {:?}",
-                    insn_id, compare_val
-                )).unwrap();
+                self.logger
+                    .log(
+                        LogLevel::Info,
+                        &format!(
+                            "Instruction id: {:?}, compare value: {:?}",
+                            insn_id, compare_val
+                        ),
+                    )
+                    .unwrap();
             }
         }
     }

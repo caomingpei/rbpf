@@ -2,7 +2,6 @@ use bytemuck::Pod;
 use std::convert::TryInto;
 use std::collections::HashMap;
 use std::cmp::max;
-
 /// Solana eBPF input message start address
 /// Input message size is 32KB
 /// END address is 0x400008000

@@ -433,7 +433,9 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             while interpreter.step() {}
 
             // interpreter.jump_tracer.print_trace();
-            interpreter.taint_engine.save_log();
+            if let Err(e) = interpreter.taint_engine.save_log() {
+                println!("Error saving log: {}", e);
+            }
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {
