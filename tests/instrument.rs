@@ -1,6 +1,8 @@
 use solana_rbpf::instrument::*;
 use std::convert::TryInto;
-
+use common::consts::INPUT_MAX_SIZE;
+use common::types::{AccountInfo};
+use parser::AccountType;
 
 /// Generate a account
 /// Parameters:
@@ -127,14 +129,14 @@ fn parser_not_duplicate_input() {
     let mut input = case_not_duplicate_input(1, instruction_number);
     assert_eq!(
         input.len() as u64,
-        8 + parser::AccountType::Normal as u64 + 8 + instruction_number + 32
+        8 + AccountType::Normal as u64 + 8 + instruction_number + 32
     ); // 8: account number, ACCOUNT_SIZE: account size (duplicate flag + 0x285f), 8: instruction number, 32: program id
 
     instruction_number = 100;
     input = case_not_duplicate_input(2, instruction_number);
     assert_eq!(
         input.len() as u64,
-        8 + parser::AccountType::Normal as u64 * 2 + 8 + instruction_number + 32
+        8 + AccountType::Normal as u64 * 2 + 8 + instruction_number + 32
     );
 }
 
@@ -148,9 +150,9 @@ fn parser_duplicate_input() {
     let mut account_all_size: u64 = 0;
     for &flag in &duplicates {
         if flag == 0xff {
-            account_all_size += parser::AccountType::Normal as u64;
+            account_all_size += AccountType::Normal as u64;
         } else {
-            account_all_size += parser::AccountType::Duplicate as u64;
+            account_all_size += AccountType::Duplicate as u64;
         }
     }
     
@@ -168,8 +170,8 @@ fn parser_scan_build() {
     let account_number: u64 = duplicates.len() as u64;
     let input = case_duplicate_input(account_number, instruction_number, &duplicates);
     let input_length = input.len();
-    let padding_input: Vec<u8> = vec![0x00; parser::INPUT_MAX_SIZE - input_length];
-    let input_args: [u8; parser::INPUT_MAX_SIZE] = [input, padding_input].concat().try_into().unwrap();
+    let padding_input: Vec<u8> = vec![0x00; INPUT_MAX_SIZE - input_length];
+    let input_args: [u8; INPUT_MAX_SIZE] = [input, padding_input].concat().try_into().unwrap();
     let input_converted = parser::scan_build(input_args).input;
     let save_accounts = input_converted.accounts;
     let save_instructions = input_converted.instructions;
@@ -188,7 +190,7 @@ fn parser_scan_build() {
 
 #[test]
 fn parser_length_checking() {
-    let account_normal_size = parser::AccountType::Normal as usize;
-    let normal_account = parser::AccountInfo::default();
+    let account_normal_size = AccountType::Normal as usize;
+    let normal_account = AccountInfo::default();
     assert_eq!(account_normal_size, std::mem::size_of_val(&normal_account));
 }

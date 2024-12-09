@@ -25,8 +25,9 @@ use crate::{
 /// Instrumentation
 use crate::instrument::jump::JumpTracer;
 use crate::instrument::*;
+use common::consts::{MM_INPUT_START, INPUT_MAX_SIZE};
+use common::types::SemanticMapping;
 
-use parser::SemanticMapping;
 use rand::Rng;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
@@ -376,9 +377,9 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
     ///     ProgramResult::Err(e) => return Err(e),
     /// }
     pub fn parse_input_from_memory(memory_mapping: &MemoryMapping) -> SemanticMapping {
-        let mut input_bytes = [0u8; parser::INPUT_MAX_SIZE];
-        for i in 0..parser::INPUT_MAX_SIZE {
-            match memory_mapping.load::<u8>(parser::INPUT_ADDRESS_U64 + i as u64) {
+        let mut input_bytes = [0u8; INPUT_MAX_SIZE];
+        for i in 0..INPUT_MAX_SIZE {
+            match memory_mapping.load::<u8>(MM_INPUT_START + i as u64) {
                 ProgramResult::Ok(byte) => {
                     input_bytes[i] = byte as u8;
                 }

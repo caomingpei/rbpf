@@ -5,89 +5,12 @@ use std::cmp::max;
 /// Solana eBPF input message start address
 /// Input message size is 32KB
 /// END address is 0x400008000
-pub const TEXT_START_U64: u64 = 0x100000120;
-pub const INPUT_ADDRESS_U64: u64 = 0x400000000;
-pub const INPUT_MAX_SIZE: usize = 0x8000;
-pub const INPUT_END_U64: u64 = INPUT_ADDRESS_U64 + INPUT_MAX_SIZE as u64;
-
+use common::consts::{INPUT_MAX_SIZE};
+use common::types::{Attribute, AccountInfo, Input, SemanticMapping};
 /// Input account duplicate types
 pub enum AccountType {
     Normal = 0x2860,
     Duplicate = 0x08,
-}
-
-/// The Input Struct
-#[allow(dead_code)]
-#[derive(Clone)]
-pub struct Input {
-    /// The number of accounts
-    pub account_number: [u8; 8],
-    /// The accounts, dynamically allocated
-    pub accounts: Box<[AccountInfo]>,
-    /// The number of instructions
-    pub instruction_number: [u8; 8],
-    /// The instructions, dynamically allocated
-    pub instructions: Box<[u8]>,
-    /// The program id
-    pub program_id: [u8; 32],
-}
-
-impl Input {
-    /// Create a new input struct
-    pub fn new(account_number: u64, instruction_number: u64) -> Self {
-        Self {
-            account_number: account_number.to_le_bytes().try_into().unwrap(),
-            accounts: vec![AccountInfo::default(); max(account_number as usize, 4096)].into_boxed_slice(), // Limit the account number to 0x8000/8 =4096
-            instruction_number: instruction_number.to_le_bytes().try_into().unwrap(),
-            instructions: vec![0; max(instruction_number as usize, 32768)].into_boxed_slice(), // Limit the instruction number to 0x8000
-            program_id: [0; 32],
-        }
-    }
-}
-
-/// Normal account info struct
-#[derive(Clone, Copy)]
-pub struct AccountInfo {
-    /// The duplicate flag, 0xff means not duplicated, otherwise indicate the account index number
-    pub duplicate: u8,
-    /// Whether the account is a signer
-    pub is_signer: bool,
-    /// Whether the account is writable
-    pub is_writable: bool,
-    /// Whether the account is executable
-    pub is_executable: bool,
-    /// Padding for the account
-    pub padding: [u8; 4],
-    /// The pubkey of the account
-    pub pubkey: [u8; 32],
-    /// The owner pubkey of the account
-    pub owner_pubkey: [u8;32],
-    /// The lamports of the account
-    pub lamports: [u8; 8],
-    /// The data length of the account
-    pub data_len: [u8; 8],
-    /// The data of the account
-    pub data: [u8; 10240], // 10K Padding for the account data (program data maximum size)
-    /// The rent epoch of the account
-    pub rent_epoch: [u8; 8],
-}
-
-impl Default for AccountInfo {
-    fn default() -> Self {
-        Self {
-            duplicate: 0,
-            is_signer: false,
-            is_writable: false,
-            is_executable: false,
-            padding: [0; 4],
-            pubkey: [0; 32],
-            owner_pubkey: [0; 32],
-            lamports: [0; 8],
-            data_len: [0; 8],
-            data: [0; 10240],
-            rent_epoch: [0; 8],
-        }
-    }
 }
 
 /// Convert a slice of bytes to a number
@@ -106,55 +29,6 @@ where
     *bytemuck::from_bytes(bytes)
 }
 
-
-
-/// Attribute of the Input, Used for semantic mapping from Input to Running.
-#[derive(Clone, Debug)]
-pub enum Attribute {
-    /// NumberAccount: The number of accounts in the instruction
-    NumberAccount,
-    /// Account: the account info, info include:
-    /// - duplicate: the duplicate flag of the account
-    /// - is_signer: the signer flag of the account
-    /// - is_writable: the writable flag of the account
-    /// - is_account: the account flag of the account
-    /// - pubkey: the pubkey of the account
-    /// - owner_pubkey: the owner pubkey of the account
-    /// - lamports: the lamports of the account
-    Account {
-        /// The index of the account in the input
-        index: u64, 
-        /// The info of the account
-        info: String
-    },
-    /// NumberInstruction: The number of instructions in the instruction
-    NumberInstruction,
-    /// Instruction: the instruction info
-    Instruction {
-        /// The index of the instruction in the input
-        index: u64
-    },
-    /// ProgramId: The program id in the instruction
-    ProgramId,
-}
-
-/// The semantic mapping struct
-pub struct SemanticMapping {
-    /// The input struct
-    pub input: Input,
-    /// The mapping from the input to the attribute
-    pub mapping: HashMap<u64, Attribute>,
-}
-
-impl SemanticMapping {
-    /// Create a new semantic mapping struct
-    pub fn new(input: Input, mapping: HashMap<u64, Attribute>) -> Self {
-        Self {
-            input,
-            mapping,
-        }
-    }
-}
 
 /// Parse the account from the input
 fn parse_account(input: &[u8], ptr: &mut usize, idx: u64, mapping: &mut HashMap<u64, Attribute>) -> AccountInfo {

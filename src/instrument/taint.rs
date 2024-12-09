@@ -1,20 +1,21 @@
 use memmap2::{MmapMut, MmapOptions};
-use serde::{Deserialize, Serialize};
-use serde_json;
 use std::error::Error;
 use std::{
     collections::HashMap,
     fmt::{self, Debug},
     fs::{File, OpenOptions},
-    os::unix,
 };
 use bincode;
 
-use crate::instrument::log::{LogLevel, TaintLog};
-use crate::instrument::parser::*;
+use std::io::{Read, Write};
+use std::path::Path;
+use std::thread;
+use fs2::FileExt;
 
-const SHM_PATH: &str = "/tmp/NovaFuzzer_memory";
-const MM_PROGRAM_START: u64 = 0x100000000;
+use crate::instrument::log::{LogLevel, TaintLog};
+
+use common::types::{CommonAddress, Attribute, SemanticMapping, SerializableData};
+use common::consts::{SHM_PATH, MM_PROGRAM_START, MM_INPUT_START};
 
 /// Type of the taint state
 #[derive(Clone)]
@@ -67,31 +68,6 @@ pub struct TaintEngine {
     pub other_log: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct SerializableData {
-    instruction_compare: HashMap<CommonAddress, Vec<u64>>,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct CommonAddress {
-    pub address: u64,
-    pub offset: u8,
-}
-
-impl Debug for CommonAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CommonAddress { address, offset } => {
-                if *address < MM_PROGRAM_START {
-                    write!(f, "{:#04x}[{}]", address, offset)
-                } else {
-                    write!(f, "{:#09x}", address)
-                }
-            }
-        }
-    }
-}
-
 /// Mapping the vm address to the common address
 /// {address: u64, offset: u8}
 /// if the vm_address is less than MM_PROGRAM_START (0x100000000), which is a kind of register address,
@@ -129,13 +105,13 @@ impl TaintEngine {
             other_log: Vec::new(),
         };
         println!(
-            "Base input address is the default value: {:#018x}",
-            INPUT_ADDRESS_U64
+            "Base input address is the default value: {:#09x}",
+            MM_INPUT_START
         );
         let mapping = &memory.semantic_mapping.mapping;
         for offset in mapping.keys() {
             let vm_address = CommonAddress {
-                address: INPUT_ADDRESS_U64 + offset,
+                address: MM_INPUT_START + offset,
                 offset: 0,
             };
             let attribute = mapping[offset].clone();
@@ -232,24 +208,26 @@ impl TaintEngine {
             .write(true)
             .create(true)
             .open(SHM_PATH)?;
+        file.lock_exclusive()?;
 
         file.set_len(shm_size as u64)?;
         let mut mmap = unsafe { MmapOptions::new().len(shm_size).map_mut(&file)? };
-
         mmap[..serialized_data.len()].copy_from_slice(&serialized_data);
-        println!("Debug: File created at {}", SHM_PATH);  // 添加此行
-        println!("Debug: Data size: {}", shm_size);       // 添加此行
+        drop(mmap);
+        file.unlock()?;
+
+        println!("Debug: Data size: {}", shm_size);
         Ok(())
     }
 
     /// Save the taint history and instruction and others compare to the file
     pub fn save_log(&mut self) -> Result<(), Box<dyn Error>> {
         println!("Debug: Saving log");
-
+        println!("Debug: Instruction Compare Length: {:?}", self.instruction_compare.len());
         let instruction_serializable = SerializableData {
             instruction_compare: self.instruction_compare.clone(),
+            semantic_mapping: self.semantic_mapping.mapping.clone(),
         };
-        println!("Debug: Data prepared");
         
         match self.pass_memory(instruction_serializable) {
             Ok(_) => println!("Debug: Pass memory successful"),
