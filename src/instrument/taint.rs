@@ -1,22 +1,15 @@
-use memmap2::{MmapMut, MmapOptions};
+use bincode;
 use std::error::Error;
 use std::{
     collections::HashMap,
     fmt::{self, Debug},
-    fs::{File, OpenOptions},
 };
-use bincode;
-
-use std::io::{Read, Write};
-use std::path::Path;
-use std::thread;
-use fs2::FileExt;
 
 use crate::instrument::log::{LogLevel, TaintLog};
 use crate::instrument::parser;
 
-use common::types::{CommonAddress, Attribute, SemanticMapping, SerializableData};
-use common::consts::{SHM_PATH, MM_PROGRAM_START, MM_INPUT_START};
+use common::consts::{MM_INPUT_START, MM_PROGRAM_START, ZMQ_SOCKET};
+use common::types::{Attribute, CommonAddress, SemanticMapping, SerializableData};
 
 /// Type of the taint state
 #[derive(Clone)]
@@ -67,6 +60,7 @@ pub struct TaintEngine {
     pub instruction_compare: HashMap<CommonAddress, Vec<u64>>,
     pub logger: TaintLog,
     pub other_log: Vec<String>,
+    pub publisher: zmq::Socket,
 }
 
 /// Mapping the vm address to the common address
@@ -97,6 +91,9 @@ pub fn address_mapping(vm_address: u64, length: u8) -> Vec<CommonAddress> {
 impl TaintEngine {
     pub fn new(semantic_mapping: SemanticMapping) -> Self {
         // TODO: set the specific address to monitor
+        let context = zmq::Context::new();
+        let publisher = context.socket(zmq::PAIR).unwrap();
+        publisher.bind(ZMQ_SOCKET).unwrap();
         let mut memory = TaintEngine {
             history: Vec::new(),
             state: HashMap::new(),
@@ -104,6 +101,7 @@ impl TaintEngine {
             instruction_compare: HashMap::new(),
             logger: TaintLog::new("taint_log.txt").unwrap(),
             other_log: Vec::new(),
+            publisher: publisher,
         };
         println!(
             "Base input address is the default value: {:#09x}",
@@ -202,31 +200,23 @@ impl TaintEngine {
     /// Pass the memory to the shared memory
     pub fn pass_memory(&mut self, data: SerializableData) -> Result<(), Box<dyn Error>> {
         let serialized_data = bincode::serialize(&data)?;
-        let shm_size = serialized_data.len();
+        self.publisher.send(&serialized_data, 0).unwrap();
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(SHM_PATH)?;
-        file.lock_exclusive()?;
-
-        file.set_len(shm_size as u64)?;
-        let mut mmap = unsafe { MmapOptions::new().len(shm_size).map_mut(&file)? };
-        mmap[..serialized_data.len()].copy_from_slice(&serialized_data);
-        drop(mmap);
-        file.unlock()?;
-
-        println!("Debug: Data size: {}", shm_size);
+        println!("Debug: Pass memory Data size: {}", serialized_data.len());
         Ok(())
     }
 
     /// Save the taint history and instruction and others compare to the file
     pub fn save_log(&mut self) -> Result<(), Box<dyn Error>> {
         println!("Debug: Saving log");
-        println!("Debug: Instruction Compare Length: {:?}", self.instruction_compare.len());
+        println!(
+            "Debug: Instruction Compare Length: {:?}",
+            self.instruction_compare.len()
+        );
         let mut pass_data = Vec::new();
-        for i in 0..parser::convert_bytes_to_num::<u64>(&self.semantic_mapping.input.instruction_number) {
+        for i in
+            0..parser::convert_bytes_to_num::<u64>(&self.semantic_mapping.input.instruction_number)
+        {
             pass_data.push(self.semantic_mapping.input.instructions[i as usize]);
         }
         let instruction_serializable = SerializableData {
@@ -234,12 +224,12 @@ impl TaintEngine {
             mapping: self.semantic_mapping.mapping.clone(),
             input: pass_data,
         };
-        
+
         match self.pass_memory(instruction_serializable) {
             Ok(_) => println!("Debug: Pass memory successful"),
             Err(e) => println!("Debug: Pass memory failed: {}", e),
         }
-        
+
         self.logger
             .log(
                 LogLevel::Critical,
