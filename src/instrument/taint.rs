@@ -13,6 +13,7 @@ use std::thread;
 use fs2::FileExt;
 
 use crate::instrument::log::{LogLevel, TaintLog};
+use crate::instrument::parser;
 
 use common::types::{CommonAddress, Attribute, SemanticMapping, SerializableData};
 use common::consts::{SHM_PATH, MM_PROGRAM_START, MM_INPUT_START};
@@ -224,9 +225,14 @@ impl TaintEngine {
     pub fn save_log(&mut self) -> Result<(), Box<dyn Error>> {
         println!("Debug: Saving log");
         println!("Debug: Instruction Compare Length: {:?}", self.instruction_compare.len());
+        let mut pass_data = Vec::new();
+        for i in 0..parser::convert_bytes_to_num::<u64>(&self.semantic_mapping.input.instruction_number) {
+            pass_data.push(self.semantic_mapping.input.instructions[i as usize]);
+        }
         let instruction_serializable = SerializableData {
             instruction_compare: self.instruction_compare.clone(),
-            semantic_mapping: self.semantic_mapping.mapping.clone(),
+            mapping: self.semantic_mapping.mapping.clone(),
+            input: pass_data,
         };
         
         match self.pass_memory(instruction_serializable) {
