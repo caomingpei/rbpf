@@ -11,6 +11,8 @@
 // copied, modified, or distributed except according to those terms.
 
 //! Virtual machine for eBPF programs.
+use common::relayer::SenderManager;
+use std::sync::Mutex;
 
 use crate::{
     ebpf,
@@ -25,7 +27,7 @@ use crate::{
 /// Instrumentation
 use crate::instrument::jump::JumpTracer;
 use crate::instrument::*;
-use common::consts::{MM_INPUT_START, INPUT_MAX_SIZE};
+use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START};
 use common::types::SemanticMapping;
 
 use rand::Rng;
@@ -325,6 +327,8 @@ pub struct EbpfVm<'a, C: ContextObject> {
     /// TCP port for the debugger interface
     #[cfg(feature = "debugger")]
     pub debug_port: Option<u16>,
+    /// SenderManager
+    pub sender_manager: &'static Mutex<SenderManager>,
 }
 
 impl<'a, C: ContextObject> EbpfVm<'a, C> {
@@ -335,6 +339,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         context_object: &'a mut C,
         mut memory_mapping: MemoryMapping<'a>,
         stack_len: usize,
+        sender_manager: &'static Mutex<SenderManager>,
     ) -> Self {
         let config = loader.get_config();
         let stack_pointer =
@@ -364,6 +369,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             loader,
             #[cfg(feature = "debugger")]
             debug_port: None,
+            sender_manager,
         }
     }
 
@@ -417,7 +423,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         // if interpreted {
         if FORCE_INTERPRETED {
             let semantic_mapping = Self::parse_input_from_memory(&self.memory_mapping);
-            let taint_engine = taint::TaintEngine::new(semantic_mapping);
+            let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
             println!("Taint engine created");
             let mut jump_tracer = JumpTracer::new();
             #[cfg(feature = "debugger")]

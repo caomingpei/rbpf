@@ -9,7 +9,9 @@ use crate::instrument::log::{LogLevel, TaintLog};
 use crate::instrument::parser;
 
 use common::consts::{MM_INPUT_START, MM_PROGRAM_START, ZMQ_SOCKET};
+use common::relayer::SenderManager;
 use common::types::{Attribute, CommonAddress, SemanticMapping, SerializableData};
+use std::sync::Mutex;
 
 /// Type of the taint state
 #[derive(Clone)]
@@ -60,7 +62,7 @@ pub struct TaintEngine {
     pub instruction_compare: HashMap<CommonAddress, Vec<u64>>,
     pub logger: TaintLog,
     pub other_log: Vec<String>,
-    pub publisher: zmq::Socket,
+    pub sender_manager: &'static Mutex<SenderManager>,
 }
 
 /// Mapping the vm address to the common address
@@ -89,11 +91,12 @@ pub fn address_mapping(vm_address: u64, length: u8) -> Vec<CommonAddress> {
 }
 
 impl TaintEngine {
-    pub fn new(semantic_mapping: SemanticMapping) -> Self {
-        // TODO: set the specific address to monitor
-        let context = zmq::Context::new();
-        let publisher = context.socket(zmq::PAIR).unwrap();
-        publisher.bind(ZMQ_SOCKET).unwrap();
+    pub fn new(
+        semantic_mapping: SemanticMapping,
+        sender_manager: &'static Mutex<SenderManager>,
+    ) -> Self {
+        // // TODO: set the specific address to monitor
+        // let sender = SenderManager::instance();
         let mut memory = TaintEngine {
             history: Vec::new(),
             state: HashMap::new(),
@@ -101,7 +104,7 @@ impl TaintEngine {
             instruction_compare: HashMap::new(),
             logger: TaintLog::new("taint_log.txt").unwrap(),
             other_log: Vec::new(),
-            publisher: publisher,
+            sender_manager,
         };
         println!(
             "Base input address is the default value: {:#09x}",
@@ -200,7 +203,8 @@ impl TaintEngine {
     /// Pass the memory to the shared memory
     pub fn pass_memory(&mut self, data: SerializableData) -> Result<(), Box<dyn Error>> {
         let serialized_data = bincode::serialize(&data)?;
-        self.publisher.send(&serialized_data, 0).unwrap();
+        let guard = self.sender_manager.lock().unwrap();
+        guard.send(&serialized_data)?;
 
         println!("Debug: Pass memory Data size: {}", serialized_data.len());
         Ok(())
