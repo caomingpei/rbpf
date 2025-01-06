@@ -20,8 +20,8 @@ use crate::{
 };
 
 
-use crate::instrument::jump::{JumpTracer, trace_jump};
-use crate::instrument::*;
+use instrument::jump::{JumpTracer, trace_jump};
+use instrument::*;
 use common::consts::{MM_PROGRAM_TEXT_START};
 
 /// Virtual memory operation helper.

@@ -25,8 +25,8 @@ use crate::{
 };
 
 /// Instrumentation
-use crate::instrument::jump::JumpTracer;
-use crate::instrument::*;
+use instrument::jump::JumpTracer;
+use instrument::*;
 use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START};
 use common::types::SemanticMapping;
 

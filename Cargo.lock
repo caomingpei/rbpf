@@ -206,16 +206,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "gdbstub"
 version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -280,6 +270,15 @@ checksum = "62f822373a4fe84d4bb149bf54e584a7f4abec90e072ed49cda0edea5b95471f"
 dependencies = [
  "equivalent",
  "hashbrown",
+]
+
+[[package]]
+name = "instrument"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "bytemuck",
+ "common",
 ]
 
 [[package]]
@@ -555,10 +554,10 @@ dependencies = [
  "combine",
  "common",
  "elf",
- "fs2",
  "gdbstub",
  "goblin",
  "hash32",
+ "instrument",
  "json",
  "libc",
  "log",
@@ -571,7 +570,6 @@ dependencies = [
  "test_utils",
  "thiserror",
  "winapi",
- "zmq",
 ]
 
 [[package]]
