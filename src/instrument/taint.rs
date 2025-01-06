@@ -68,7 +68,7 @@ pub struct TaintEngine {
 /// Mapping the vm address to the common address
 /// {address: u64, offset: u8}
 /// if the vm_address is less than MM_PROGRAM_START (0x100000000), which is a kind of register address,
-/// the offset is the register index
+/// the  is the register index
 /// else, the vm_address is the memory address, the offset is 0
 pub fn address_mapping(vm_address: u64, length: u8) -> Vec<CommonAddress> {
     let mut addresses = Vec::new();
@@ -76,14 +76,14 @@ pub fn address_mapping(vm_address: u64, length: u8) -> Vec<CommonAddress> {
         for i in 0..length {
             addresses.push(CommonAddress {
                 address: vm_address,
-                offset: i,
+                index: i,
             });
         }
     } else {
         for i in 0..length {
             addresses.push(CommonAddress {
                 address: vm_address + i as u64,
-                offset: 0,
+                index: 0,
             });
         }
     }
@@ -114,7 +114,7 @@ impl TaintEngine {
         for offset in mapping.keys() {
             let vm_address = CommonAddress {
                 address: MM_INPUT_START + offset,
-                offset: 0,
+                index: 0,
             };
             let attribute = mapping[offset].clone();
             memory.state.insert(
