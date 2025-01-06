@@ -11,7 +11,7 @@
 // copied, modified, or distributed except according to those terms.
 
 //! Virtual machine for eBPF programs.
-use common::relayer::SenderManager;
+use common::message::SenderManager;
 use std::sync::Mutex;
 
 use crate::{

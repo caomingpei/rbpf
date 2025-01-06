@@ -8,8 +8,8 @@ use std::{
 use crate::instrument::log::{LogLevel, TaintLog};
 use crate::instrument::parser;
 
-use common::consts::{MM_INPUT_START, MM_PROGRAM_START, ZMQ_SOCKET};
-use common::relayer::SenderManager;
+use common::consts::{MM_INPUT_START, MM_PROGRAM_START};
+use common::message::SenderManager;
 use common::types::{Attribute, CommonAddress, SemanticMapping, SerializableData};
 use std::sync::Mutex;
 
