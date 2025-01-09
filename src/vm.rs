@@ -11,7 +11,7 @@
 // copied, modified, or distributed except according to those terms.
 
 //! Virtual machine for eBPF programs.
-use common::message::SenderManager;
+
 use std::sync::Mutex;
 use std::path::PathBuf;
 use crate::{
@@ -30,6 +30,8 @@ use instrument::{Instrumenter};
 use instrument::parser;
 use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START};
 use common::types::SemanticMapping;
+use common::message::SenderManager;
+use instrument::taint::taint_save_log;
 
 use rand::Rng;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
@@ -443,10 +445,16 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             while interpreter.step() {}
 
             // interpreter.jump_tracer.print_trace();
-            let instrumenter = &mut interpreter.instrumenter;
-            if let Err(e) = instrumenter.taint_engine.save_log() {
-                println!("Error saving log: {}", e);
+            if let Err(e) = interpreter.instrumenter.taint_engine.pass_memory() {
+                println!("Error passing memory: {}", e);
             }
+            if let Some(logger) = &mut interpreter.instrumenter.logger {
+                taint_save_log(logger, &interpreter.instrumenter.taint_engine);
+            }
+            // let instrumenter = &mut interpreter.instrumenter;
+            // if let Err(e) = instrumenter.taint_engine.save_log() {
+            //     println!("Error saving log: {}", e);
+            // }
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {
