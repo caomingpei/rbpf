@@ -20,8 +20,9 @@ use crate::{
 };
 
 
-use instrument::jump::{JumpTracer, trace_jump};
-use instrument::*;
+use instrument::Instrumenter;
+use instrument::taint;
+use instrument::jump::trace_jump;
 use common::consts::{MM_PROGRAM_TEXT_START};
 
 /// Virtual memory operation helper.
@@ -96,8 +97,7 @@ pub struct Interpreter<'a, 'b, C: ContextObject> {
     pub(crate) executable: &'a Executable<C>,
     pub(crate) program: &'a [u8],
     pub(crate) program_vm_addr: u64,
-    pub(crate) jump_tracer: JumpTracer,
-    pub(crate) taint_engine: taint::TaintEngine,
+    pub(crate) instrumenter: Instrumenter,
     /// General purpose registers and pc
     pub reg: [u64; 12],
 
@@ -113,8 +113,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         vm: &'a mut EbpfVm<'b, C>,
         executable: &'a Executable<C>,
         registers: [u64; 12],
-        jump_tracer: JumpTracer,
-        taint_engine: taint::TaintEngine,
+        instrumenter: Instrumenter,
     ) -> Self {
         let (program_vm_addr, program) = executable.get_text_bytes();
         Self {
@@ -122,8 +121,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             executable,
             program,
             program_vm_addr,
-            jump_tracer,
-            taint_engine,
+            instrumenter,
             reg: registers,
             #[cfg(feature = "debugger")]
             debug_state: DebugState::Continue,
@@ -198,7 +196,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 self.reg[dst] = insn.imm as u64;
                 let dsts = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.clear_taint(dsts[i]);
+                    self.instrumenter.taint_engine.clear_taint(dsts[i]);
                 }
                 self.reg[11] += 1;
                 next_pc += 1;
@@ -212,7 +210,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 1);
                 let tos = taint::address_mapping(dst as u64, 1);
                 for i in 0..1 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_H_REG   => {
@@ -222,7 +220,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 2);
                 let tos = taint::address_mapping(dst as u64, 2);
                 for i in 0..2 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_W_REG   => {
@@ -232,7 +230,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 4);
                 let tos = taint::address_mapping(dst as u64, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::LD_DW_REG  => {
@@ -242,7 +240,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(vm_addr, 8);
                 let tos = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
 
@@ -252,7 +250,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 translate_memory_access!(self, store, insn.imm, vm_addr, u8);
                 let tos = taint::address_mapping(vm_addr, 1);
                 for i in 0..1 {
-                    self.taint_engine.clear_taint(tos[i]);
+                    self.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
             },
             ebpf::ST_H_IMM   => {
@@ -260,7 +258,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 translate_memory_access!(self, store, insn.imm, vm_addr, u16);
                 let tos = taint::address_mapping(vm_addr, 2);
                 for i in 0..2 {
-                    self.taint_engine.clear_taint(tos[i]);
+                    self.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
             },
             ebpf::ST_W_IMM   => {
@@ -268,7 +266,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 translate_memory_access!(self, store, insn.imm, vm_addr, u32);
                 let tos = taint::address_mapping(vm_addr, 4);
                 for i in 0..4 {
-                    self.taint_engine.clear_taint(tos[i]);
+                    self.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
             },
             ebpf::ST_DW_IMM  => {
@@ -276,7 +274,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 translate_memory_access!(self, store, insn.imm, vm_addr, u64);
                 let tos = taint::address_mapping(vm_addr, 8);
                 for i in 0..8 {
-                    self.taint_engine.clear_taint(tos[i]);
+                    self.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
             },
 
@@ -288,7 +286,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 1);
                 let tos = taint::address_mapping(vm_addr, 1);
                 for i in 0..1 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ST_H_REG   => {
@@ -298,7 +296,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 2);
                 let tos = taint::address_mapping(vm_addr, 2);
                 for i in 0..2 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ST_W_REG   => {
@@ -308,7 +306,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 4);
                 let tos = taint::address_mapping(vm_addr, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ST_DW_REG  => {
@@ -318,7 +316,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 8);
                 let tos = taint::address_mapping(vm_addr, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
 
@@ -358,7 +356,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 self.reg[dst] = insn.imm as u32 as u64;
                 let tos = taint::address_mapping(dst as u64, 4);
                 for i in 0..4 {
-                    self.taint_engine.clear_taint(tos[i]);
+                    self.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
             },
             ebpf::MOV32_REG  => {
@@ -367,7 +365,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 4);
                 let tos = taint::address_mapping(dst as u64, 4);
                 for i in 0..4 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ARSH32_IMM => self.reg[dst] = (self.reg[dst] as i32).wrapping_shr(insn.imm as u32)      as u64 & (u32::MAX as u64),
@@ -429,7 +427,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 self.reg[dst] =  insn.imm as u64;
                 let tos = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.clear_taint(tos[i]);
+                    self.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
             },
             ebpf::MOV64_REG  => {
@@ -438,7 +436,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let froms = taint::address_mapping(src as u64, 8);
                 let tos = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
+                    self.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
             },
             ebpf::ARSH64_IMM => self.reg[dst] = (self.reg[dst] as i64).wrapping_shr(insn.imm as u32)      as u64,
@@ -522,18 +520,18 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             },
 
             // BPF_JMP class
-            ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JEQ_IMM => {
-                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let tainted_addrs = self.instrumenter.taint_engine.get_if_instruction_taints();
                 // self.reg[dst] is the address of the destination register, change to dst
                 let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 for addr in dst_tainted_addrs {
                     let imm_ptr = (insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START;
-                    self.taint_engine.other_log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
+                    self.instrumenter.taint_engine.other_log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
                             println!("DEBUG: Match found! Adding imm value: {:#x}", insn.imm);
-                            self.taint_engine.instruction_compare
+                            self.instrumenter.taint_engine.instruction_compare
                                 .entry(*source)
                                 .or_insert_with(Vec::new)
                                 .push(insn.imm as u64);
@@ -543,19 +541,19 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 
                 if self.reg[dst] == insn.imm as u64 {
                     let target = (next_pc as i64 + insn.off as i64) as u64;
-                    trace_jump!(self.jump_tracer, next_pc, target, true);
+                    trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true);
                     next_pc = target;
                 }
             },
             ebpf::JEQ_REG    => {
-                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let tainted_addrs = self.instrumenter.taint_engine.get_if_instruction_taints();
                 // TODO: dst reg[dst] need to think more
                 let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 let src_tainted_addrs = taint::address_mapping(src as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            self.taint_engine.instruction_compare
+                            self.instrumenter.taint_engine.instruction_compare
                                 .entry(*source)
                                 .or_insert_with(Vec::new)
                                 .push(self.reg[src]);
@@ -565,7 +563,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 for addr in src_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            self.taint_engine.instruction_compare
+                            self.instrumenter.taint_engine.instruction_compare
                                 .entry(*source)
                                 .or_insert_with(Vec::new)
                                 .push(self.reg[dst]);
@@ -574,28 +572,28 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
                 if  self.reg[dst] == self.reg[src] { 
                     let target = (next_pc as i64 + insn.off as i64) as u64; 
-                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); 
                     next_pc = target; 
                 }
             },
-            ebpf::JGT_IMM    => if  self.reg[dst] >  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JGT_REG    => if  self.reg[dst] >  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JGE_IMM    => if  self.reg[dst] >= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JGE_REG    => if  self.reg[dst] >= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JLT_IMM    => if  self.reg[dst] <  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JLT_REG    => if  self.reg[dst] <  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
-            ebpf::JLE_IMM    => if  self.reg[dst] <= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JLE_REG    => if  self.reg[dst] <= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
-            ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGT_IMM    => if  self.reg[dst] >  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGT_REG    => if  self.reg[dst] >  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGE_IMM    => if  self.reg[dst] >= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JGE_REG    => if  self.reg[dst] >= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JLT_IMM    => if  self.reg[dst] <  insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JLT_REG    => if  self.reg[dst] <  self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target;},
+            ebpf::JLE_IMM    => if  self.reg[dst] <= insn.imm as u64              { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JLE_REG    => if  self.reg[dst] <= self.reg[src]                { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target;},
+            ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JNE_IMM    => {
-                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let tainted_addrs = self.instrumenter.taint_engine.get_if_instruction_taints();
                 // TODO: dst reg[dst] need to think more
                 let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            self.taint_engine.instruction_compare
+                            self.instrumenter.taint_engine.instruction_compare
                                 .entry(*source)
                                 .or_insert_with(Vec::new)
                                 .push(insn.imm as u64);
@@ -604,19 +602,19 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
                 if  self.reg[dst] != insn.imm as u64 { 
                     let target = (next_pc as i64 + insn.off as i64) as u64; 
-                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); 
                     next_pc = target; 
                 }
             },
             ebpf::JNE_REG    => {
-                let tainted_addrs = self.taint_engine.get_if_instruction_taints();
+                let tainted_addrs = self.instrumenter.taint_engine.get_if_instruction_taints();
                 // TODO: dst reg[dst] need to think more
                 let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 let src_tainted_addrs = taint::address_mapping(src as u64, 8);
                 for addr in dst_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            self.taint_engine.instruction_compare
+                            self.instrumenter.taint_engine.instruction_compare
                                 .entry(*source)
                                 .or_insert_with(Vec::new)
                                 .push(self.reg[src]);
@@ -626,7 +624,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 for addr in src_tainted_addrs {
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
-                            self.taint_engine.instruction_compare
+                            self.instrumenter.taint_engine.instruction_compare
                                 .entry(*source)
                                 .or_insert_with(Vec::new)
                                 .push(self.reg[dst]);
@@ -635,18 +633,18 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
                 if  self.reg[dst] != self.reg[src]                { 
                     let target = (next_pc as i64 + insn.off as i64) as u64; 
-                    trace_jump!(self.jump_tracer, next_pc, target, true); 
+                    trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); 
                     next_pc = target; 
                 }
             },
-            ebpf::JSGT_IMM   => if (self.reg[dst] as i64) >  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSGT_REG   => if (self.reg[dst] as i64) >  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target;},
-            ebpf::JSGE_IMM   => if (self.reg[dst] as i64) >= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSGE_REG   => if (self.reg[dst] as i64) >= self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSLT_IMM   => if (self.reg[dst] as i64) <  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSLT_REG   => if (self.reg[dst] as i64) <  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSLE_IMM   => if (self.reg[dst] as i64) <= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
-            ebpf::JSLE_REG   => if (self.reg[dst] as i64) <= self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSGT_IMM   => if (self.reg[dst] as i64) >  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSGT_REG   => if (self.reg[dst] as i64) >  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target;},
+            ebpf::JSGE_IMM   => if (self.reg[dst] as i64) >= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSGE_REG   => if (self.reg[dst] as i64) >= self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLT_IMM   => if (self.reg[dst] as i64) <  insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLT_REG   => if (self.reg[dst] as i64) <  self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLE_IMM   => if (self.reg[dst] as i64) <= insn.imm             { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
+            ebpf::JSLE_REG   => if (self.reg[dst] as i64) <= self.reg[src] as i64 { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
 
             ebpf::CALL_REG   => {
                 let target_pc = if self.executable.get_sbpf_version().callx_uses_src_reg() {
@@ -717,6 +715,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
 
             ebpf::EXIT       => {
                 if self.vm.call_depth == 0 {
+                    // TODO: provide a way to check if the instruction transaction is valid.
                     if config.enable_instruction_meter && self.vm.due_insn_count > self.vm.previous_instruction_meter {
                         throw_error!(self, EbpfError::ExceededMaxInstructions);
                     }

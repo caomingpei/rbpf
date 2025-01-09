@@ -13,7 +13,7 @@
 //! Virtual machine for eBPF programs.
 use common::message::SenderManager;
 use std::sync::Mutex;
-
+use std::path::PathBuf;
 use crate::{
     ebpf,
     elf::Executable,
@@ -25,8 +25,9 @@ use crate::{
 };
 
 /// Instrumentation
-use instrument::jump::JumpTracer;
-use instrument::*;
+// use instrument::jump::JumpTracer;
+use instrument::{Instrumenter};
+use instrument::parser;
 use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START};
 use common::types::SemanticMapping;
 
@@ -422,14 +423,16 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         // TODO: Remove this after testing
         // if interpreted {
         if FORCE_INTERPRETED {
+            let mut instrumenter = Instrumenter::new(Some(PathBuf::from("test.log")));
             let semantic_mapping = Self::parse_input_from_memory(&self.memory_mapping);
-            let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
-            println!("Taint engine created");
-            let mut jump_tracer = JumpTracer::new();
+            instrumenter.taint_engine.activate(vec![], semantic_mapping);
+            // let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
+            // println!("Taint engine created");
+            // let mut jump_tracer = JumpTracer::new();
             #[cfg(feature = "debugger")]
             let debug_port = self.debug_port.clone();
             let mut interpreter =
-                Interpreter::new(self, executable, self.registers, jump_tracer, taint_engine);
+                Interpreter::new(self, executable, self.registers, instrumenter);
             #[cfg(feature = "debugger")]
             if let Some(debug_port) = debug_port {
                 crate::debugger::execute(&mut interpreter, debug_port);
@@ -440,7 +443,8 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             while interpreter.step() {}
 
             // interpreter.jump_tracer.print_trace();
-            if let Err(e) = interpreter.taint_engine.save_log() {
+            let instrumenter = &mut interpreter.instrumenter;
+            if let Err(e) = instrumenter.taint_engine.save_log() {
                 println!("Error saving log: {}", e);
             }
         } else {
