@@ -113,6 +113,27 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         vm: &'a mut EbpfVm<'b, C>,
         executable: &'a Executable<C>,
         registers: [u64; 12],
+    ) -> Self {
+        let (program_vm_addr, program) = executable.get_text_bytes();
+        Self {
+            vm,
+            executable,
+            program,
+            program_vm_addr,
+            reg: registers,
+            instrumenter: Instrumenter::new(None),
+            #[cfg(feature = "debugger")]
+            debug_state: DebugState::Continue,
+            #[cfg(feature = "debugger")]
+            breakpoints: Vec::new(),
+        }
+    }
+    
+    /// Creates a new interpreter state with instrumenter
+    pub fn new_with_instrumenter(
+        vm: &'a mut EbpfVm<'b, C>,
+        executable: &'a Executable<C>,
+        registers: [u64; 12],
         instrumenter: Instrumenter,
     ) -> Self {
         let (program_vm_addr, program) = executable.get_text_bytes();
@@ -129,6 +150,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             breakpoints: Vec::new(),
         }
     }
+
 
     /// Translate between the virtual machines' pc value and the pc value used by the debugger
     #[cfg(feature = "debugger")]
