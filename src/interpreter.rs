@@ -97,7 +97,6 @@ pub struct Interpreter<'a, 'b, C: ContextObject> {
     pub(crate) executable: &'a Executable<C>,
     pub(crate) program: &'a [u8],
     pub(crate) program_vm_addr: u64,
-    pub(crate) instrumenter: Instrumenter,
     /// General purpose registers and pc
     pub reg: [u64; 12],
 
@@ -121,7 +120,6 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             program,
             program_vm_addr,
             reg: registers,
-            instrumenter: Instrumenter::new(None),
             #[cfg(feature = "debugger")]
             debug_state: DebugState::Continue,
             #[cfg(feature = "debugger")]
@@ -129,27 +127,27 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         }
     }
     
-    /// Creates a new interpreter state with instrumenter
-    pub fn new_with_instrumenter(
-        vm: &'a mut EbpfVm<'b, C>,
-        executable: &'a Executable<C>,
-        registers: [u64; 12],
-        instrumenter: Instrumenter,
-    ) -> Self {
-        let (program_vm_addr, program) = executable.get_text_bytes();
-        Self {
-            vm,
-            executable,
-            program,
-            program_vm_addr,
-            instrumenter,
-            reg: registers,
-            #[cfg(feature = "debugger")]
-            debug_state: DebugState::Continue,
-            #[cfg(feature = "debugger")]
-            breakpoints: Vec::new(),
-        }
-    }
+    // /// Creates a new interpreter state with instrumenter
+    // pub fn new_with_instrumenter(
+    //     vm: &'a mut EbpfVm<'b, C>,
+    //     executable: &'a Executable<C>,
+    //     registers: [u64; 12],
+    //     instrumenter: &'a mut Instrumenter,
+    // ) -> Self {
+    //     let (program_vm_addr, program) = executable.get_text_bytes();
+    //     Self {
+    //         vm,
+    //         executable,
+    //         program,
+    //         program_vm_addr,
+    //         instrumenter,
+    //         reg: registers,
+    //         #[cfg(feature = "debugger")]
+    //         debug_state: DebugState::Continue,
+    //         #[cfg(feature = "debugger")]
+    //         breakpoints: Vec::new(),
+    //     }
+    // }
 
 
     /// Translate between the virtual machines' pc value and the pc value used by the debugger
@@ -218,7 +216,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 self.reg[dst] = insn.imm as u64;
                 let dsts = taint::address_mapping(dst as u64, 8);
                 for i in 0..8 {
-                    self.instrumenter.taint_engine.clear_taint(dsts[i]);
+                    self.vm.instrumenter.taint_engine.clear_taint(dsts[i]);
                 }
                 self.reg[11] += 1;
                 next_pc += 1;
