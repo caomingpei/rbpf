@@ -527,7 +527,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
                 for addr in dst_tainted_addrs {
                     let imm_ptr = (insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START;
-                    self.instrumenter.taint_engine.other_log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
+                    // self.instrumenter.taint_engine.other_log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
                     for (tainted_addr, source) in &tainted_addrs {
                         if *tainted_addr == addr {
                             println!("DEBUG: Match found! Adding imm value: {:#x}", insn.imm);

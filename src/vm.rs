@@ -330,8 +330,8 @@ pub struct EbpfVm<'a, C: ContextObject> {
     /// TCP port for the debugger interface
     #[cfg(feature = "debugger")]
     pub debug_port: Option<u16>,
-    /// SenderManager
-    pub sender_manager: &'static Mutex<SenderManager>,
+    // /// SenderManager
+    // pub sender_manager: &'static Mutex<SenderManager>,
 }
 
 impl<'a, C: ContextObject> EbpfVm<'a, C> {
@@ -342,7 +342,6 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         context_object: &'a mut C,
         mut memory_mapping: MemoryMapping<'a>,
         stack_len: usize,
-        sender_manager: &'static Mutex<SenderManager>,
     ) -> Self {
         let config = loader.get_config();
         let stack_pointer =
@@ -372,7 +371,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             loader,
             #[cfg(feature = "debugger")]
             debug_port: None,
-            sender_manager,
+            // sender_manager: &sender_manager,
         }
     }
 
@@ -385,16 +384,21 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
     ///     ProgramResult::Ok(account_number) => println!("ACCOUNT NUMBER: {:?}", account_number),
     ///     ProgramResult::Err(e) => return Err(e),
     /// }
-    pub fn parse_input_from_memory(memory_mapping: &MemoryMapping) -> SemanticMapping {
-        let mut input_bytes = [0u8; INPUT_MAX_SIZE];
-        for i in 0..INPUT_MAX_SIZE {
+    pub fn parse_input_from_memory(&self, memory_mapping: &MemoryMapping) -> SemanticMapping {
+        const TEXT_SIZE: usize = 76800;
+        let mut input_bytes = [0u8; TEXT_SIZE];
+        for i in 0..TEXT_SIZE {
             match memory_mapping.load::<u8>(MM_INPUT_START + i as u64) {
                 ProgramResult::Ok(byte) => {
                     input_bytes[i] = byte as u8;
                 }
-                ProgramResult::Err(e) => break,
+                ProgramResult::Err(e) => {
+                    println!("Error parsing input from memory: {}", e);
+                    break;
+                }
             }
         }
+        // Error: return stuck, maybe out of index
         parser::scan_build(input_bytes)
     }
 
@@ -426,8 +430,8 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         // if interpreted {
         if FORCE_INTERPRETED {
             let mut instrumenter = Instrumenter::new(Some(PathBuf::from("test.log")));
-            let semantic_mapping = Self::parse_input_from_memory(&self.memory_mapping);
-            instrumenter.taint_engine.activate(vec![], semantic_mapping);
+            // let semantic_mapping = self.parse_input_from_memory(&self.memory_mapping);
+            // instrumenter.taint_engine.activate(vec![], semantic_mapping);
             // let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
             // println!("Taint engine created");
             // let mut jump_tracer = JumpTracer::new();
@@ -444,17 +448,17 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
 
-            // interpreter.jump_tracer.print_trace();
-            if let Err(e) = interpreter.instrumenter.taint_engine.pass_memory() {
-                println!("Error passing memory: {}", e);
-            }
-            if let Some(logger) = &mut interpreter.instrumenter.logger {
-                taint_save_log(logger, &interpreter.instrumenter.taint_engine);
-            }
-            // let instrumenter = &mut interpreter.instrumenter;
-            // if let Err(e) = instrumenter.taint_engine.save_log() {
-            //     println!("Error saving log: {}", e);
+            // // interpreter.jump_tracer.print_trace();
+            // if let Err(e) = interpreter.instrumenter.taint_engine.pass_memory() {
+            //     println!("Error passing memory: {}", e);
             // }
+            // if let Some(logger) = &mut interpreter.instrumenter.logger {
+            //     match taint_save_log(logger, &interpreter.instrumenter.taint_engine) {
+            //         Ok(_) => println!("Taint log saved successfully"),
+            //         Err(e) => println!("Error saving taint log: {}", e),
+            //     }
+            // }
+        
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {
