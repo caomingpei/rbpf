@@ -372,7 +372,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             memory_mapping,
             call_frames: vec![CallFrame::default(); config.max_call_depth],
             loader,
-            instrumenter: Instrumenter::new(None),
+            instrumenter: Instrumenter::new(),
             #[cfg(feature = "debugger")]
             debug_port: None,
             // sender_manager: &sender_manager,
@@ -755,9 +755,11 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         // TODO: Remove this after testing
         // if interpreted {
         if FORCE_INTERPRETED {
-            let mut instrumenter = Instrumenter::new(Some(PathBuf::from("test.log")));
+            // let mut instrumenter = Instrumenter::new(Some(PathBuf::from("test.log")));
+            self.instrumenter
+                .set_logger(Some(PathBuf::from("test.log")));
             let semantic_mapping = self.parse_input_from_memory(&self.memory_mapping);
-            instrumenter
+            self.instrumenter
                 .taint_engine
                 .activate(vec![], semantic_mapping.clone());
 
@@ -776,16 +778,15 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
 
-            // interpreter.jump_tracer.print_trace();
-            // if let Err(e) = interpreter.instrumenter.taint_engine.pass_memory() {
-            //     println!("Error passing memory: {}", e);
-            // }
-            // if let Some(logger) = &mut interpreter.instrumenter.logger {
-            //     match taint_save_log(logger, &interpreter.instrumenter.taint_engine) {
-            //         Ok(_) => println!("Taint log saved successfully"),
-            //         Err(e) => println!("Error saving taint log: {}", e),
-            //     }
-            // }
+            if let Err(e) = self.instrumenter.taint_engine.pass_memory() {
+                println!("Error passing memory: {}", e);
+            }
+            if let Some(logger) = &mut self.instrumenter.logger {
+                match taint_save_log(logger, &self.instrumenter.taint_engine) {
+                    Ok(_) => println!("Taint log saved successfully"),
+                    Err(e) => println!("Error saving taint log: {}", e),
+                }
+            }
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {
