@@ -379,33 +379,6 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         }
     }
 
-    /// Parse the input state from memory
-    ///
-    /// Returns the semantic mapping of the input state
-    /// Test Case:
-    /// let account_number = memory_mapping.load::<u64>(crate::instrument::parser::INPUT_ADDRESS_U64);
-    /// match account_number {
-    ///     ProgramResult::Ok(account_number) => println!("ACCOUNT NUMBER: {:?}", account_number),
-    ///     ProgramResult::Err(e) => return Err(e),
-    /// }
-    // pub fn parse_input_from_memory(&self, memory_mapping: &MemoryMapping) -> SemanticMapping {
-    //     const TEXT_SIZE: usize = 51746;
-    //     let mut input_bytes = [0u8; TEXT_SIZE];
-    //     for i in 0..TEXT_SIZE {
-    //         match memory_mapping.load::<u8>(MM_INPUT_START + i as u64) {
-    //             ProgramResult::Ok(byte) => {
-    //                 input_bytes[i] = byte as u8;
-    //             }
-    //             ProgramResult::Err(e) => {
-    //                 println!("Can't Parsing input from memory: {}", e);
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     // Error: return stuck, maybe out of index
-    //     parser::scan_build(input_bytes)
-    // }
-
     fn extract_input_from_memory(
         &self,
         memory_mapping: &MemoryMapping,
@@ -699,14 +672,14 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         top_ptr += 8;
         // TODO: check if this is correct
         let mut input_converted = Input::new(account_number, instruction_number);
-        input_converted.accounts = accounts.into_boxed_slice();
+        input_converted.accounts = accounts.clone();
 
         input = self.extract_input_from_memory(
             memory_mapping,
             MM_INPUT_START as usize + top_ptr,
             MM_INPUT_START as usize + top_ptr + instruction_number as usize,
         );
-        input_converted.instructions = input.to_vec().clone().into_boxed_slice();
+        input_converted.instructions = input.clone();
         for i in 0..instruction_number as u64 {
             mapping.insert(
                 top_ptr as u64 + i,

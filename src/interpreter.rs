@@ -13,15 +13,17 @@
 //! Interpreter for eBPF programs.
 
 use crate::{
-    ebpf::{self, STACK_PTR_REG},
+    ebpf::{self, JEQ_IMM, STACK_PTR_REG},
     elf::Executable,
     error::{EbpfError, ProgramResult},
     vm::{Config, ContextObject, EbpfVm},
 };
 
 
-use instrument::taint::{TaintEngine, TaintState, AddressRecord, InstructionRecord};
+use common::types::{TaintState, AddressRecord, InstructionRecord};
+use instrument::taint::TaintEngine;
 use instrument::taint;
+use instrument::parser;
 use instrument::jump::trace_jump;
 use common::consts::{MM_PROGRAM_TEXT_START};
 
@@ -129,7 +131,11 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
     
 
     /// Record the compare instruction for tainted values comparison
-    fn taint_record_eq_compare(&mut self, src: usize, dst: usize, opcode: u8, src_value: u64, dst_value: u64, addr_length: u8) {
+    /// src_value and dst_value are the values of the source and destination registers (MUST BE A LE ARRAY WITH THE SAME LENGTH)
+    fn taint_record_eq_compare(&mut self, src: usize, dst: usize, opcode: u8, src_value: &[u8], dst_value: &[u8], addr_length: u8) {
+        assert_eq!(src_value.len(), addr_length as usize, "src_value length must match addr_length");
+        assert_eq!(dst_value.len(), addr_length as usize, "dst_value length must match addr_length");
+        
         let src_addrs = taint::address_mapping(src as u64, addr_length);
         let dst_addrs = taint::address_mapping(dst as u64, addr_length);
         for i in 0..addr_length {
@@ -139,14 +145,17 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 None => &TaintState::Clean,
             }; 
             let src_addr = &src_addrs[i as usize];
-            let src_taint_state = match self.vm.instrumenter.taint_engine.state.get(src_addr) {
+            let mut src_taint_state = match self.vm.instrumenter.taint_engine.state.get(src_addr) {
                 Some(taint_state) => taint_state,
                 None => &TaintState::Clean,
             };
-
+            // Magic Process for IMM Instruction, IMM Instruction is not tainted
+            if opcode == ebpf::JEQ_IMM || opcode == ebpf::JNE_IMM {
+                src_taint_state = &TaintState::Clean;
+            }
             if dst_taint_state.is_tainted() || src_taint_state.is_tainted() {
-                let src_record = AddressRecord::new(*src_addr, src_value, src_taint_state.clone());
-                let dst_record = AddressRecord::new(*dst_addr, dst_value, dst_taint_state.clone());
+                let src_record = AddressRecord::new(*src_addr, src_value[i as usize], src_taint_state.clone());
+                let dst_record = AddressRecord::new(*dst_addr, dst_value[i as usize], dst_taint_state.clone());
                 self.vm.instrumenter.taint_engine.instruction_record.push(
                     InstructionRecord::new(opcode, src_record, dst_record)
                 );
@@ -547,7 +556,9 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JEQ_IMM => {
                 // self.reg[dst] is the address of the destination register, change to dst
-                self.taint_record_eq_compare(src, dst, insn.opc, insn.imm as u64, self.reg[dst], 8);
+                let dst_values = &self.reg[dst].to_le_bytes();
+                let imm_values = &insn.imm.to_le_bytes();
+                self.taint_record_eq_compare(src, dst, insn.opc, imm_values, dst_values, 8);
 
                 /// Remove: vector visit
                 // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
@@ -572,7 +583,9 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
             },
             ebpf::JEQ_REG    => {
-                self.taint_record_eq_compare(src, dst, insn.opc, self.reg[src], self.reg[dst], 8);
+                let dst_values = &self.reg[dst].to_le_bytes();
+                let src_values = &self.reg[src].to_le_bytes();
+                self.taint_record_eq_compare(src, dst, insn.opc, src_values, dst_values, 8);
                 // let addr_length = 8;
                 // let src_addrs = taint::address_mapping(src as u64, addr_length);
                 // let dst_addrs = taint::address_mapping(dst as u64, addr_length);
@@ -629,7 +642,9 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); next_pc = target;},
             ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JNE_IMM    => {
-                self.taint_record_eq_compare(src, dst, insn.opc, insn.imm as u64, self.reg[dst], 8);
+                let dst_values = &self.reg[dst].to_le_bytes();
+                let imm_values = &insn.imm.to_le_bytes();
+                self.taint_record_eq_compare(src, dst, insn.opc, imm_values, dst_values, 8);
                 /// Remove: 
                 // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
                 // // TODO: dst reg[dst] need to think more
@@ -651,7 +666,9 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
             },
             ebpf::JNE_REG    => {
-                self.taint_record_eq_compare(src, dst, insn.opc, self.reg[src], self.reg[dst], 8);
+                let dst_values = &self.reg[dst].to_le_bytes();
+                let src_values = &self.reg[src].to_le_bytes();
+                self.taint_record_eq_compare(src, dst, insn.opc, src_values, dst_values, 8);
                 // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
                 // // TODO: dst reg[dst] need to think more
                 // let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
