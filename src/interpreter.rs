@@ -20,8 +20,7 @@ use crate::{
 };
 
 
-use instrument::Instrumenter;
-use instrument::taint::TaintEngine;
+use instrument::taint::{TaintEngine, TaintState, AddressRecord, InstructionRecord};
 use instrument::taint;
 use instrument::jump::trace_jump;
 use common::consts::{MM_PROGRAM_TEXT_START};
@@ -128,28 +127,32 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         }
     }
     
-    // /// Creates a new interpreter state with instrumenter
-    // pub fn new_with_instrumenter(
-    //     vm: &'a mut EbpfVm<'b, C>,
-    //     executable: &'a Executable<C>,
-    //     registers: [u64; 12],
-    //     instrumenter: &'a mut Instrumenter,
-    // ) -> Self {
-    //     let (program_vm_addr, program) = executable.get_text_bytes();
-    //     Self {
-    //         vm,
-    //         executable,
-    //         program,
-    //         program_vm_addr,
-    //         instrumenter,
-    //         reg: registers,
-    //         #[cfg(feature = "debugger")]
-    //         debug_state: DebugState::Continue,
-    //         #[cfg(feature = "debugger")]
-    //         breakpoints: Vec::new(),
-    //     }
-    // }
 
+    /// Record the compare instruction for tainted values comparison
+    fn taint_record_eq_compare(&mut self, src: usize, dst: usize, opcode: u8, src_value: u64, dst_value: u64, addr_length: u8) {
+        let src_addrs = taint::address_mapping(src as u64, addr_length);
+        let dst_addrs = taint::address_mapping(dst as u64, addr_length);
+        for i in 0..addr_length {
+            let dst_addr = &dst_addrs[i as usize];
+            let dst_taint_state = match self.vm.instrumenter.taint_engine.state.get(dst_addr) {
+                Some(taint_state) => taint_state,
+                None => &TaintState::Clean,
+            }; 
+            let src_addr = &src_addrs[i as usize];
+            let src_taint_state = match self.vm.instrumenter.taint_engine.state.get(src_addr) {
+                Some(taint_state) => taint_state,
+                None => &TaintState::Clean,
+            };
+
+            if dst_taint_state.is_tainted() || src_taint_state.is_tainted() {
+                let src_record = AddressRecord::new(*src_addr, src_value, src_taint_state.clone());
+                let dst_record = AddressRecord::new(*dst_addr, dst_value, dst_taint_state.clone());
+                self.vm.instrumenter.taint_engine.instruction_record.push(
+                    InstructionRecord::new(opcode, src_record, dst_record)
+                );
+            }
+        }
+    }
 
     /// Translate between the virtual machines' pc value and the pc value used by the debugger
     #[cfg(feature = "debugger")]
@@ -543,22 +546,24 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             // BPF_JMP class
             ebpf::JA         =>                                                   { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JEQ_IMM => {
-                let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
                 // self.reg[dst] is the address of the destination register, change to dst
-                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
-                for addr in dst_tainted_addrs {
-                    let imm_ptr = (insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START;
-                    // self.instrumenter.taint_engine.other_log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
-                    for (tainted_addr, source) in &tainted_addrs {
-                        if *tainted_addr == addr {
-                            println!("DEBUG: Match found! Adding imm value: {:#x}", insn.imm);
-                            self.vm.instrumenter.taint_engine.instruction_compare
-                                .entry(*source)
-                                .or_insert_with(Vec::new)
-                                .push(insn.imm as u64);
-                        }
-                    }
-                }
+                self.taint_record_eq_compare(src, dst, insn.opc, insn.imm as u64, self.reg[dst], 8);
+
+                /// Remove: vector visit
+                // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
+                // for addr in dst_tainted_addrs {
+                //     // let imm_ptr = (insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START;
+                //     // self.instrumenter.taint_engine.other_log.push(format!("imm_ptr: {:#9x}, dst_addr: {:?}, tainted_addr: {:?}", imm_ptr, addr, &tainted_addrs));    
+                //     for (tainted_addr, source) in &tainted_addrs {
+                //         if *tainted_addr == addr {
+                //             println!("DEBUG: Match found! Adding imm value: {:#x}", insn.imm);
+                //             self.vm.instrumenter.taint_engine.instruction_compare
+                //                 .entry(*source)
+                //                 .or_insert_with(Vec::new)
+                //                 .push(insn.imm as u64);
+                //         }
+                //     }
+                // }
                 
                 if self.reg[dst] == insn.imm as u64 {
                     let target = (next_pc as i64 + insn.off as i64) as u64;
@@ -567,30 +572,46 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
             },
             ebpf::JEQ_REG    => {
-                let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
-                // TODO: dst reg[dst] need to think more
-                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
-                let src_tainted_addrs = taint::address_mapping(src as u64, 8);
-                for addr in dst_tainted_addrs {
-                    for (tainted_addr, source) in &tainted_addrs {
-                        if *tainted_addr == addr {
-                            self.vm.instrumenter.taint_engine.instruction_compare
-                                .entry(*source)
-                                .or_insert_with(Vec::new)
-                                .push(self.reg[src]);
-                        }
-                    }
-                }
-                for addr in src_tainted_addrs {
-                    for (tainted_addr, source) in &tainted_addrs {
-                        if *tainted_addr == addr {
-                            self.vm.instrumenter.taint_engine.instruction_compare
-                                .entry(*source)
-                                .or_insert_with(Vec::new)
-                                .push(self.reg[dst]);
-                        }
-                    }
-                }
+                self.taint_record_eq_compare(src, dst, insn.opc, self.reg[src], self.reg[dst], 8);
+                // let addr_length = 8;
+                // let src_addrs = taint::address_mapping(src as u64, addr_length);
+                // let dst_addrs = taint::address_mapping(dst as u64, addr_length);
+                // for i in 0..addr_length {
+                //     let dst_addr = &dst_addrs[i as usize];
+                //     let dst_taint_state_option = self.vm.instrumenter.taint_engine.state.get(dst_addr);
+                //     let src_addr = &src_addrs[i as usize];
+                //     if let Some(dst_taint_state) = dst_taint_state_option {
+                //         let src_record = AddressRecord::new(src_addr, self.reg[src], TaintState::Clean);
+                //         let dst_record = AddressRecord::new(dst_addr, self.reg[dst], dst_taint_state);
+                //         self.vm.instrumenter.taint_engine.instruction_record.push(
+                //             InstructionRecord::new(insn.opc, src_record, dst_record)
+                //         );
+                //     }
+                // }
+                // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
+                // // TODO: dst reg[dst] need to think more
+                // let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
+                // let src_tainted_addrs = taint::address_mapping(src as u64, 8);
+                // for addr in dst_tainted_addrs {
+                //     for (tainted_addr, source) in &tainted_addrs {
+                //         if *tainted_addr == addr {
+                //             self.vm.instrumenter.taint_engine.instruction_compare
+                //                 .entry(*source)
+                //                 .or_insert_with(Vec::new)
+                //                 .push(self.reg[src]);
+                //         }
+                //     }
+                // }
+                // for addr in src_tainted_addrs {
+                //     for (tainted_addr, source) in &tainted_addrs {
+                //         if *tainted_addr == addr {
+                //             self.vm.instrumenter.taint_engine.instruction_compare
+                //                 .entry(*source)
+                //                 .or_insert_with(Vec::new)
+                //                 .push(self.reg[dst]);
+                //         }
+                //     }
+                // }
                 if  self.reg[dst] == self.reg[src] { 
                     let target = (next_pc as i64 + insn.off as i64) as u64; 
                     trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); 
@@ -608,19 +629,21 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::JSET_IMM   => if  self.reg[dst] &  insn.imm as u64 != 0         { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); next_pc = target;},
             ebpf::JSET_REG   => if  self.reg[dst] &  self.reg[src] != 0           { let target = (next_pc as i64 + insn.off as i64) as u64; trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); next_pc = target; },
             ebpf::JNE_IMM    => {
-                let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
-                // TODO: dst reg[dst] need to think more
-                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
-                for addr in dst_tainted_addrs {
-                    for (tainted_addr, source) in &tainted_addrs {
-                        if *tainted_addr == addr {
-                            self.vm.instrumenter.taint_engine.instruction_compare
-                                .entry(*source)
-                                .or_insert_with(Vec::new)
-                                .push(insn.imm as u64);
-                        }
-                    }
-                }
+                self.taint_record_eq_compare(src, dst, insn.opc, insn.imm as u64, self.reg[dst], 8);
+                /// Remove: 
+                // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
+                // // TODO: dst reg[dst] need to think more
+                // let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
+                // for addr in dst_tainted_addrs {
+                //     for (tainted_addr, source) in &tainted_addrs {
+                //         if *tainted_addr == addr {
+                //             self.vm.instrumenter.taint_engine.instruction_compare
+                //                 .entry(*source)
+                //                 .or_insert_with(Vec::new)
+                //                 .push(insn.imm as u64);
+                //         }
+                //     }
+                // }
                 if  self.reg[dst] != insn.imm as u64 { 
                     let target = (next_pc as i64 + insn.off as i64) as u64; 
                     trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); 
@@ -628,30 +651,31 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 }
             },
             ebpf::JNE_REG    => {
-                let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
-                // TODO: dst reg[dst] need to think more
-                let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
-                let src_tainted_addrs = taint::address_mapping(src as u64, 8);
-                for addr in dst_tainted_addrs {
-                    for (tainted_addr, source) in &tainted_addrs {
-                        if *tainted_addr == addr {
-                            self.vm.instrumenter.taint_engine.instruction_compare
-                                .entry(*source)
-                                .or_insert_with(Vec::new)
-                                .push(self.reg[src]);
-                        }
-                    }
-                }
-                for addr in src_tainted_addrs {
-                    for (tainted_addr, source) in &tainted_addrs {
-                        if *tainted_addr == addr {
-                            self.vm.instrumenter.taint_engine.instruction_compare
-                                .entry(*source)
-                                .or_insert_with(Vec::new)
-                                .push(self.reg[dst]);
-                        }
-                    }
-                }
+                self.taint_record_eq_compare(src, dst, insn.opc, self.reg[src], self.reg[dst], 8);
+                // let tainted_addrs = self.vm.instrumenter.taint_engine.get_if_instruction_taints();
+                // // TODO: dst reg[dst] need to think more
+                // let dst_tainted_addrs = taint::address_mapping(dst as u64, 8);
+                // let src_tainted_addrs = taint::address_mapping(src as u64, 8);
+                // for addr in dst_tainted_addrs {
+                //     for (tainted_addr, source) in &tainted_addrs {
+                //         if *tainted_addr == addr {
+                //             self.vm.instrumenter.taint_engine.instruction_compare
+                //                 .entry(*source)
+                //                 .or_insert_with(Vec::new)
+                //                 .push(self.reg[src]);
+                //         }
+                //     }
+                // }
+                // for addr in src_tainted_addrs {
+                //     for (tainted_addr, source) in &tainted_addrs {
+                //         if *tainted_addr == addr {
+                //             self.vm.instrumenter.taint_engine.instruction_compare
+                //                 .entry(*source)
+                //                 .or_insert_with(Vec::new)
+                //                 .push(self.reg[dst]);
+                //         }
+                //     }
+                // }
                 if  self.reg[dst] != self.reg[src]                { 
                     let target = (next_pc as i64 + insn.off as i64) as u64; 
                     trace_jump!(self.vm.instrumenter.jump_tracer, next_pc, target, true); 
