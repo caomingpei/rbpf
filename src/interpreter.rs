@@ -766,11 +766,6 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                             println!("Calling syscall: {}", name);
                         }
                         
-                        // Test for taint engine call frame save and restore
-                        // let mut saved_taint_engine = std::mem::replace(
-                        //     &mut self.vm.instrumenter.taint_engine,
-                        //     TaintEngine::new()
-                        // );
 
                         self.vm.due_insn_count = self.vm.previous_instruction_meter - self.vm.due_insn_count;
                         self.vm.registers[0..6].copy_from_slice(&self.reg[0..6]);
