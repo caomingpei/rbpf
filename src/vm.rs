@@ -731,10 +731,11 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             // let mut instrumenter = Instrumenter::new(Some(PathBuf::from("test.log")));
             self.instrumenter
                 .set_logger(Some(PathBuf::from("test.log")));
-            let semantic_mapping = self.parse_input_from_memory(&self.memory_mapping);
+            let semantic_input = self.parse_input_from_memory(&self.memory_mapping);
+            self.instrumenter.semantic_input = semantic_input;
             self.instrumenter
                 .taint_engine
-                .activate(vec![], semantic_mapping.clone());
+                .activate(&self.instrumenter.semantic_input.mapping, vec![]);
 
             // let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
             // println!("Taint engine created");
@@ -751,7 +752,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
 
-            if let Err(e) = self.instrumenter.taint_engine.pass_memory() {
+            if let Err(e) = self.instrumenter.taint_engine.pass_memory(&self.instrumenter.semantic_input) {
                 println!("Error passing memory: {}", e);
             }
             if let Some(logger) = &mut self.instrumenter.logger {
