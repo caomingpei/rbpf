@@ -312,7 +312,7 @@ macro_rules! declare_builtin_function {
                 $arg_d: u64,
                 $arg_e: u64,
                 $memory_mapping: &mut $MemoryMapping,
-                instrumenter: &Instrumenter,
+                instrumenter: &mut Instrumenter,
             ) -> $Result {
                 cpi_common::<Self>($vm, $arg_a, $arg_b, $arg_c, $arg_d, $arg_e, $memory_mapping, instrumenter)
             }
@@ -343,7 +343,7 @@ macro_rules! declare_builtin_function {
                     $arg_d,
                     $arg_e,
                     &mut vm.memory_mapping,
-                    &vm.instrumenter
+                    &mut vm.instrumenter
                 ).map_err(|err| $crate::error::EbpfError::SyscallError(err)).into();
                 vm.program_result = converted_result;
                 if config.enable_instruction_meter {
