@@ -13,10 +13,7 @@
 //! Interpreter for eBPF programs.
 
 use crate::{
-    ebpf::{self, JEQ_IMM, STACK_PTR_REG},
-    elf::Executable,
-    error::{EbpfError, ProgramResult},
-    vm::{Config, ContextObject, EbpfVm},
+    ebpf::{self, JEQ_IMM, STACK_PTR_REG}, elf::Executable, error::{EbpfError, ProgramResult}, memory_region::AccessType, vm::{Config, ContextObject, EbpfVm}
 };
 
 
@@ -761,22 +758,35 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                     if let Some((_function_name, function)) = self.executable.get_loader().get_function_registry().lookup_by_key(insn.imm as u32) {
                         resolved = true;
                     
-                        // print the function name
+                        // NovaFuzz: print the function name
                         if let Ok(name) = std::str::from_utf8(_function_name) {
                             println!("Calling syscall: {}", name);
                         }
-                        
+
+                        // NovaFuzz: save the taint engine
+                        let saved_taint_engine = std::mem::take(&mut self.vm.instrumenter.taint_engine);
+                        self.vm.instrumenter.taint_engine = TaintEngine::new();
 
                         self.vm.due_insn_count = self.vm.previous_instruction_meter - self.vm.due_insn_count;
                         self.vm.registers[0..6].copy_from_slice(&self.reg[0..6]);
                         self.vm.invoke_function(function);
                         self.vm.due_insn_count = 0;
+
                         self.reg[0] = match &self.vm.program_result {
                             ProgramResult::Ok(value) => *value,
                             ProgramResult::Err(_err) => return false,
                         };
 
-                        // self.vm.instrumenter.taint_engine = saved_taint_engine;
+                        // NovaFuzz: restore the taint engine
+                        self.vm.instrumenter.taint_engine = saved_taint_engine;
+                        // NovaFuzz: Clear the return value of the function taint state.
+                        let to_addrs = taint::address_mapping(self.reg[0] as u64, 8);
+                        for i in 0..to_addrs.len(){
+                            let to = to_addrs[i];
+                            self.vm.instrumenter.taint_engine.state.remove(&to);
+                            self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, 
+                            insn.opc, to, to, self.reg[0] as u8);
+                        }
                     }
                 }
 
