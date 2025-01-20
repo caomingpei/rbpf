@@ -21,6 +21,19 @@ use crate::{
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, TraceLogEntry},
 };
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START};
+use common::message::SenderManager;
+use common::types::{AccountInfo, Attribute, Input, SemanticMapping};
+use instrument::parser::convert_bytes_to_num;
+use instrument::taint::taint_save_log;
+/// Instrumentation
+// use instrument::jump::JumpTracer;
+use instrument::Instrumenter;
+use std::collections::HashMap;
+
 use rand::Rng;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
@@ -315,9 +328,13 @@ pub struct EbpfVm<'a, C: ContextObject> {
     pub call_frames: Vec<CallFrame>,
     /// Loader built-in program
     pub loader: Arc<BuiltinProgram<C>>,
+    /// Instrumenter
+    pub instrumenter: Instrumenter,
     /// TCP port for the debugger interface
     #[cfg(feature = "debugger")]
     pub debug_port: Option<u16>,
+    // /// SenderManager
+    // pub sender_manager: &'static Mutex<SenderManager>,
 }
 
 impl<'a, C: ContextObject> EbpfVm<'a, C> {
@@ -355,9 +372,333 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             memory_mapping,
             call_frames: vec![CallFrame::default(); config.max_call_depth],
             loader,
+            instrumenter: Instrumenter::new(),
             #[cfg(feature = "debugger")]
             debug_port: None,
+            // sender_manager: &sender_manager,
         }
+    }
+
+    fn extract_input_from_memory(
+        &self,
+        memory_mapping: &MemoryMapping,
+        start_ptr: usize,
+        end_ptr: usize,
+    ) -> Vec<u8> {
+        let mut input_bytes = Vec::new();
+        for i in start_ptr..end_ptr {
+            match memory_mapping.load::<u8>(i as u64) {
+                ProgramResult::Ok(byte) => {
+                    input_bytes.push(byte as u8);
+                }
+                ProgramResult::Err(e) => {
+                    println!("Can't Parsing input from memory: {}", e);
+                    break;
+                }
+            }
+        }
+        input_bytes
+    }
+
+    fn parse_account(
+        &self,
+        memory_mapping: &MemoryMapping,
+        ptr: &mut usize,
+        idx: u64,
+        mapping: &mut HashMap<u64, Attribute>,
+    ) -> AccountInfo {
+        let mut account = AccountInfo::default();
+        let mut input = self.extract_input_from_memory(
+            memory_mapping,
+            MM_INPUT_START as usize + *ptr,
+            MM_INPUT_START as usize + *ptr + 1,
+        );
+        account.duplicate = convert_bytes_to_num::<u8>(&input.clone());
+        mapping.insert(
+            *ptr as u64,
+            Attribute::Account {
+                index: idx,
+                info: "duplicate".to_string(),
+            },
+        );
+        *ptr += 1;
+        if account.duplicate != 0xff_u8 {
+            // 7 bytes padding
+            for i in 0..7 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("duplicate_padding[{}]", i),
+                    },
+                );
+            }
+            *ptr += 7;
+        } else {
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 1,
+            );
+            account.is_signer = convert_bytes_to_num::<u8>(&input.clone()) == 1;
+            mapping.insert(
+                *ptr as u64,
+                Attribute::Account {
+                    index: idx,
+                    info: "is_signer".to_string(),
+                },
+            );
+            *ptr += 1;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 1,
+            );
+            account.is_writable = convert_bytes_to_num::<u8>(&input.clone()) == 1;
+            mapping.insert(
+                *ptr as u64,
+                Attribute::Account {
+                    index: idx,
+                    info: "is_writable".to_string(),
+                },
+            );
+            *ptr += 1;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 1,
+            );
+            account.is_executable = convert_bytes_to_num::<u8>(&input.clone()) == 1;
+            mapping.insert(
+                *ptr as u64,
+                Attribute::Account {
+                    index: idx,
+                    info: "is_executable".to_string(),
+                },
+            );
+            *ptr += 1;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 4,
+            );
+            account.padding = convert_bytes_to_num::<[u8; 4]>(&input.clone());
+            for i in 0..4 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("padding[{}]", i),
+                    },
+                );
+            }
+            *ptr += 4;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 32,
+            );
+            account.pubkey = convert_bytes_to_num::<[u8; 32]>(&input.clone());
+            for i in 0..32 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("pubkey[{}]", i),
+                    },
+                );
+            }
+            *ptr += 32;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 32,
+            );
+            account.owner_pubkey = convert_bytes_to_num::<[u8; 32]>(&input.clone());
+            for i in 0..32 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("owner_pubkey[{}]", i),
+                    },
+                );
+            }
+            *ptr += 32;
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 8,
+            );
+            account.lamports = convert_bytes_to_num::<[u8; 8]>(&input.clone());
+            for i in 0..8 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("lamports[{}]", i),
+                    },
+                );
+            }
+            *ptr += 8;
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 8,
+            );
+            account.data_len = convert_bytes_to_num::<[u8; 8]>(&input.clone());
+            let data_len = convert_bytes_to_num::<u64>(&input.clone());
+            for i in 0..8 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("data_len[{}]", i),
+                    },
+                );
+            }
+            *ptr += 8;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + data_len as usize,
+            );
+            for i in 0..data_len {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("data[{}]", i),
+                    },
+                );
+            }
+            account.data = input.to_vec().clone();
+            *ptr += data_len as usize;
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 10240,
+            );
+            for i in 0..10240 {
+                mapping.insert(
+                    *ptr as u64 + i,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("realloc_data[{}]", i),
+                    },
+                );
+            }
+            for i in 0..10240 {
+                account.realloc_data[i] = input[i].clone();
+            }
+            *ptr += 10240;
+
+            if *ptr % 8 != 0 {
+                let align_size = 8 - *ptr % 8;
+                input = self.extract_input_from_memory(
+                    memory_mapping,
+                    MM_INPUT_START as usize + *ptr,
+                    MM_INPUT_START as usize + *ptr + align_size,
+                );
+                account.align_data = input.to_vec().clone();
+                for i in 0..align_size {
+                    mapping.insert(
+                        *ptr as u64 + i as u64,
+                        Attribute::Account {
+                            index: idx,
+                            info: format!("align_data[{}]", i),
+                        },
+                    );
+                }
+                *ptr += align_size;
+            }
+
+            input = self.extract_input_from_memory(
+                memory_mapping,
+                MM_INPUT_START as usize + *ptr,
+                MM_INPUT_START as usize + *ptr + 8,
+            );
+            account.rent_epoch = convert_bytes_to_num::<[u8; 8]>(&input.clone());
+            for i in 0..8 {
+                mapping.insert(
+                    *ptr as u64 + i as u64,
+                    Attribute::Account {
+                        index: idx,
+                        info: format!("rent_epoch[{}]", i),
+                    },
+                );
+            }
+            *ptr += 8;
+        }
+        return account;
+    }
+
+    pub fn parse_input_from_memory(&self, memory_mapping: &MemoryMapping) -> SemanticMapping {
+        let mut top_ptr: usize = 0 as usize;
+        let mut mapping: HashMap<u64, Attribute> = HashMap::new();
+
+        let mut input = self.extract_input_from_memory(
+            memory_mapping,
+            MM_INPUT_START as usize + top_ptr,
+            MM_INPUT_START as usize + top_ptr + 8,
+        );
+        let account_number = convert_bytes_to_num::<u64>(&input.clone());
+        for i in 0..8 {
+            mapping.insert(top_ptr as u64 + i, Attribute::NumberAccount);
+        }
+        let mut accounts: Vec<AccountInfo> = vec![];
+        top_ptr += 8;
+        for idx in 0..account_number {
+            let account = self.parse_account(&memory_mapping, &mut top_ptr, idx, &mut mapping);
+            accounts.push(account);
+        }
+
+        input = self.extract_input_from_memory(
+            memory_mapping,
+            MM_INPUT_START as usize + top_ptr,
+            MM_INPUT_START as usize + top_ptr + 8,
+        );
+        let instruction_number = convert_bytes_to_num::<u64>(&input.clone());
+        for i in 0..8 {
+            mapping.insert(top_ptr as u64 + i, Attribute::NumberInstruction);
+        }
+        top_ptr += 8;
+        // TODO: check if this is correct
+        let mut input_converted = Input::new(account_number, instruction_number);
+        input_converted.accounts = accounts.clone();
+
+        input = self.extract_input_from_memory(
+            memory_mapping,
+            MM_INPUT_START as usize + top_ptr,
+            MM_INPUT_START as usize + top_ptr + instruction_number as usize,
+        );
+        input_converted.instructions = input.clone();
+        for i in 0..instruction_number as u64 {
+            mapping.insert(
+                top_ptr as u64 + i,
+                Attribute::Instruction { index: i as u64 },
+            );
+        }
+        top_ptr += instruction_number as usize;
+
+        input = self.extract_input_from_memory(
+            memory_mapping,
+            MM_INPUT_START as usize + top_ptr,
+            MM_INPUT_START as usize + top_ptr + 32,
+        );
+        input_converted.program_id = convert_bytes_to_num::<[u8; 32]>(&input.clone());
+        for i in 0..32 {
+            mapping.insert(top_ptr as u64 + i, Attribute::ProgramId);
+        }
+        top_ptr += 32;
+        SemanticMapping::new(input_converted, mapping)
     }
 
     /// Execute the program
@@ -382,7 +723,23 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         self.previous_instruction_meter = initial_insn_count;
         self.due_insn_count = 0;
         self.program_result = ProgramResult::Ok(0);
-        if interpreted {
+        // Force to use interpreter for now
+        const FORCE_INTERPRETED: bool = true;
+        // TODO: Remove this after testing
+        // if interpreted {
+        if FORCE_INTERPRETED {
+            // let mut instrumenter = Instrumenter::new(Some(PathBuf::from("test.log")));
+            self.instrumenter
+                .set_logger(Some(PathBuf::from("test.log")));
+            let semantic_input = self.parse_input_from_memory(&self.memory_mapping);
+            self.instrumenter.semantic_input = semantic_input;
+            self.instrumenter
+                .taint_engine
+                .activate(&self.instrumenter.semantic_input.mapping, vec![]);
+
+            // let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
+            // println!("Taint engine created");
+            // let mut jump_tracer = JumpTracer::new();
             #[cfg(feature = "debugger")]
             let debug_port = self.debug_port.clone();
             let mut interpreter = Interpreter::new(self, executable, self.registers);
@@ -394,6 +751,16 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             }
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
+
+            if let Err(e) = self.instrumenter.taint_engine.pass_memory(&self.instrumenter.semantic_input) {
+                println!("Error passing memory: {}", e);
+            }
+            if let Some(logger) = &mut self.instrumenter.logger {
+                match taint_save_log(logger, &self.instrumenter.taint_engine) {
+                    Ok(_) => println!("Taint log saved successfully"),
+                    Err(e) => println!("Error saving taint log: {}", e),
+                }
+            }
         } else {
             #[cfg(all(feature = "jit", not(target_os = "windows"), target_arch = "x86_64"))]
             {
