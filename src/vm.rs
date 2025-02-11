@@ -752,13 +752,10 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             #[cfg(not(feature = "debugger"))]
             while interpreter.step() {}
 
-            if let Err(e) = self
-                .instrumenter
-                .taint_engine
-                .pass_memory(&self.instrumenter.semantic_input)
-            {
-                println!("Error passing memory: {}", e);
+            if let Err(e) = self.instrumenter.pass_memory() {
+                println!("Error passing instrumenter memory: {}", e);
             }
+
             // if let Some(logger) = &mut self.instrumenter.logger {
             //     match taint_save_log(logger, &self.instrumenter.taint_engine) {
             //         Ok(_) => println!("Taint log saved successfully"),
