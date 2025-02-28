@@ -17,16 +17,15 @@ use crate::{
     elf::Executable,
     error::{EbpfError, ProgramResult},
     interpreter::Interpreter,
-    memory_region::MemoryMapping,
+    memory_region::{AccessType, MemoryMapping},
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, TraceLogEntry},
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START};
-use common::message::SenderManager;
-use common::types::{AccountInfo, Attribute, Input, SemanticMapping};
+use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START, MM_PROGRAM_START};
+use common::types::{AccountAttribute, AccountInfo, Attribute, Input, SemanticMapping};
 use instrument::parser::convert_bytes_to_num;
 use instrument::taint::taint_save_log;
 /// Instrumentation
@@ -418,18 +417,18 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             *ptr as u64,
             Attribute::Account {
                 index: idx,
-                info: "duplicate".to_string(),
+                info: AccountAttribute::Duplicate,
             },
         );
         *ptr += 1;
         if account.duplicate != 0xff_u8 {
             // 7 bytes padding
-            for i in 0..7 {
+            for i: u8 in 0..7 {
                 mapping.insert(
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("duplicate_padding[{}]", i),
+                        info: AccountAttribute::DuplicatePadding(i),
                     },
                 );
             }
@@ -445,7 +444,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 *ptr as u64,
                 Attribute::Account {
                     index: idx,
-                    info: "is_signer".to_string(),
+                    info: AccountAttribute::IsSigner,
                 },
             );
             *ptr += 1;
@@ -460,7 +459,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 *ptr as u64,
                 Attribute::Account {
                     index: idx,
-                    info: "is_writable".to_string(),
+                    info: AccountAttribute::IsWritable,
                 },
             );
             *ptr += 1;
@@ -475,7 +474,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 *ptr as u64,
                 Attribute::Account {
                     index: idx,
-                    info: "is_executable".to_string(),
+                    info: AccountAttribute::IsExecutable
                 },
             );
             *ptr += 1;
@@ -491,7 +490,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("padding[{}]", i),
+                        info: AccountAttribute::Padding(i as u8)
                     },
                 );
             }
@@ -508,7 +507,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("pubkey[{}]", i),
+                        info: AccountAttribute::Pubkey(i as u8),
                     },
                 );
             }
@@ -525,7 +524,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("owner_pubkey[{}]", i),
+                        info: AccountAttribute::OwnerPubkey(i as u8),
                     },
                 );
             }
@@ -541,7 +540,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("lamports[{}]", i),
+                        info: AccountAttribute::Lamports(i as u8),
                     },
                 );
             }
@@ -558,7 +557,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("data_len[{}]", i),
+                        info: AccountAttribute::DataLen(i as u8),
                     },
                 );
             }
@@ -574,7 +573,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("data[{}]", i),
+                        info: AccountAttribute::Data(i as u16),
                     },
                 );
             }
@@ -591,7 +590,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: format!("realloc_data[{}]", i),
+                        info: AccountAttribute::ReallocData(i as u16),
                     },
                 );
             }
@@ -613,7 +612,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                         *ptr as u64 + i as u64,
                         Attribute::Account {
                             index: idx,
-                            info: format!("align_data[{}]", i),
+                            info: AccountAttribute::AlignData(i as u8),
                         },
                     );
                 }
@@ -631,7 +630,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i as u64,
                     Attribute::Account {
                         index: idx,
-                        info: format!("rent_epoch[{}]", i),
+                        info: AccountAttribute::RentEpoch(i as u8),
                     },
                 );
             }
