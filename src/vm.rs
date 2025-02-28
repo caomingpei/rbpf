@@ -21,13 +21,13 @@ use crate::{
     program::{BuiltinFunction, BuiltinProgram, FunctionRegistry, SBPFVersion},
     static_analysis::{Analysis, TraceLogEntry},
 };
+use bytemuck::Pod;
 use std::path::PathBuf;
+
 use std::sync::Mutex;
 
 use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START, MM_PROGRAM_START};
 use common::types::{AccountAttribute, AccountInfo, Attribute, Input, SemanticMapping};
-use instrument::parser::convert_bytes_to_num;
-use instrument::taint::taint_save_log;
 /// Instrumentation
 // use instrument::jump::JumpTracer;
 use instrument::Instrumenter;
@@ -240,6 +240,22 @@ pub struct CallFrame {
     pub target_pc: u64,
 }
 
+/// Convert a slice of bytes to a number
+/// Order: Little Endian
+/// Example:
+/// ```
+/// let value = [0xff, 0x00, 0x00, 0x00];
+/// let num = convert_bytes_to_num::<u32>(&value);
+/// assert_eq!(num, 255);
+/// ```
+pub fn convert_bytes_to_num<T>(value: &[u8]) -> T
+where
+    T: Pod + Clone,
+{
+    let bytes = &value[..core::mem::size_of::<T>()];
+    *bytemuck::from_bytes(bytes)
+}
+
 /// A virtual machine to run eBPF programs.
 ///
 /// # Examples
@@ -423,12 +439,12 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         *ptr += 1;
         if account.duplicate != 0xff_u8 {
             // 7 bytes padding
-            for i: u8 in 0..7 {
+            for i in 0..7 {
                 mapping.insert(
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: AccountAttribute::DuplicatePadding(i),
+                        info: AccountAttribute::DuplicatePadding(i as u8),
                     },
                 );
             }
@@ -474,7 +490,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 *ptr as u64,
                 Attribute::Account {
                     index: idx,
-                    info: AccountAttribute::IsExecutable
+                    info: AccountAttribute::IsExecutable,
                 },
             );
             *ptr += 1;
@@ -490,7 +506,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     *ptr as u64 + i,
                     Attribute::Account {
                         index: idx,
-                        info: AccountAttribute::Padding(i as u8)
+                        info: AccountAttribute::Padding(i as u8),
                     },
                 );
             }

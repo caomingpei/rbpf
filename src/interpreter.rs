@@ -20,7 +20,6 @@ use crate::{
 use common::types::{AddressRecord, CommonAddress, InstructionRecord, TaintState};
 use instrument::taint::TaintEngine;
 use instrument::taint;
-use instrument::parser;
 use instrument::jump::trace_jump;
 use common::consts::{MM_PROGRAM_TEXT_START};
 
