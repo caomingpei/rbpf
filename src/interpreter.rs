@@ -17,7 +17,7 @@ use crate::{
 };
 
 
-use common::types::{TaintState, AddressRecord, InstructionRecord};
+use common::types::{AddressRecord, CommonAddress, InstructionRecord, TaintState};
 use instrument::taint::TaintEngine;
 use instrument::taint;
 use instrument::parser;
@@ -133,8 +133,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
         assert_eq!(src_value.len(), addr_length as usize, "src_value length must match addr_length");
         assert_eq!(dst_value.len(), addr_length as usize, "dst_value length must match addr_length");
         
-        let src_addrs = taint::address_mapping(src as u64, addr_length);
-        let dst_addrs = taint::address_mapping(dst as u64, addr_length);
+        let src_addrs = CommonAddress::address_mapping(src as u64, addr_length);
+        let dst_addrs = CommonAddress::address_mapping(dst as u64, addr_length);
         for i in 0..addr_length {
             let dst_addr = &dst_addrs[i as usize];
             let dst_taint_state = match self.vm.instrumenter.taint_engine.state.get(dst_addr) {
@@ -224,7 +224,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::LD_DW_IMM  => {
                 ebpf::augment_lddw_unchecked(self.program, &mut insn);
                 self.reg[dst] = insn.imm as u64;
-                let dsts = taint::address_mapping(dst as u64, 8);
+                let dsts = CommonAddress::address_mapping(dst as u64, 8);
                 for i in 0..8 {
                     self.vm.instrumenter.taint_engine.clear_taint(dsts[i]);
                 }
@@ -237,8 +237,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u8);
                 let le_bytes_array = self.reg[dst].to_le_bytes();
-                let froms = taint::address_mapping(vm_addr, 1);
-                let tos = taint::address_mapping(dst as u64, 1);
+                let froms = CommonAddress::address_mapping(vm_addr, 1);
+                let tos = CommonAddress::address_mapping(dst as u64, 1);
                 for i in 0..1 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -247,8 +247,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u16);
                 let le_bytes_array = self.reg[dst].to_le_bytes();
-                let froms = taint::address_mapping(vm_addr, 2);
-                let tos = taint::address_mapping(dst as u64, 2);
+                let froms = CommonAddress::address_mapping(vm_addr, 2);
+                let tos = CommonAddress::address_mapping(dst as u64, 2);
                 for i in 0..2 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -257,8 +257,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u32);
                 let le_bytes_array = self.reg[dst].to_le_bytes();
-                let froms = taint::address_mapping(vm_addr, 4);
-                let tos = taint::address_mapping(dst as u64, 4);
+                let froms = CommonAddress::address_mapping(vm_addr, 4);
+                let tos = CommonAddress::address_mapping(dst as u64, 4);
                 for i in 0..4 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -267,8 +267,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[src] as i64).wrapping_add(insn.off as i64) as u64;
                 self.reg[dst] = translate_memory_access!(self, load, vm_addr, u64);
                 let le_bytes_array = self.reg[dst].to_le_bytes();
-                let froms = taint::address_mapping(vm_addr, 8);
-                let tos = taint::address_mapping(dst as u64, 8);
+                let froms = CommonAddress::address_mapping(vm_addr, 8);
+                let tos = CommonAddress::address_mapping(dst as u64, 8);
                 for i in 0..8 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -278,7 +278,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::ST_B_IMM   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add( insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u8);
-                let tos = taint::address_mapping(vm_addr, 1);
+                let tos = CommonAddress::address_mapping(vm_addr, 1);
                 for i in 0..1 {
                     self.vm.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
@@ -286,7 +286,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::ST_H_IMM   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u16);
-                let tos = taint::address_mapping(vm_addr, 2);
+                let tos = CommonAddress::address_mapping(vm_addr, 2);
                 for i in 0..2 {
                     self.vm.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
@@ -294,7 +294,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::ST_W_IMM   => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u32);
-                let tos = taint::address_mapping(vm_addr, 4);
+                let tos = CommonAddress::address_mapping(vm_addr, 4);
                 for i in 0..4 {
                     self.vm.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
@@ -302,7 +302,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::ST_DW_IMM  => {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, insn.imm, vm_addr, u64);
-                let tos = taint::address_mapping(vm_addr, 8);
+                let tos = CommonAddress::address_mapping(vm_addr, 8);
                 for i in 0..8 {
                     self.vm.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
@@ -313,8 +313,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u8);
                 let le_bytes_array = self.reg[src].to_le_bytes();
-                let froms = taint::address_mapping(src as u64, 1);
-                let tos = taint::address_mapping(vm_addr, 1);
+                let froms = CommonAddress::address_mapping(src as u64, 1);
+                let tos = CommonAddress::address_mapping(vm_addr, 1);
                 for i in 0..1 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -323,8 +323,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u16);
                 let le_bytes_array = self.reg[src].to_le_bytes();
-                let froms = taint::address_mapping(src as u64, 2);
-                let tos = taint::address_mapping(vm_addr, 2);
+                let froms = CommonAddress::address_mapping(src as u64, 2);
+                let tos = CommonAddress::address_mapping(vm_addr, 2);
                 for i in 0..2 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -333,8 +333,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u32);
                 let le_bytes_array = self.reg[src].to_le_bytes();
-                let froms = taint::address_mapping(src as u64, 4);
-                let tos = taint::address_mapping(vm_addr, 4);
+                let froms = CommonAddress::address_mapping(src as u64, 4);
+                let tos = CommonAddress::address_mapping(vm_addr, 4);
                 for i in 0..4 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -343,8 +343,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                 let vm_addr = (self.reg[dst] as i64).wrapping_add(insn.off as i64) as u64;
                 translate_memory_access!(self, store, self.reg[src], vm_addr, u64);
                 let le_bytes_array = self.reg[src].to_le_bytes();
-                let froms = taint::address_mapping(src as u64, 8);
-                let tos = taint::address_mapping(vm_addr, 8);
+                let froms = CommonAddress::address_mapping(src as u64, 8);
+                let tos = CommonAddress::address_mapping(vm_addr, 8);
                 for i in 0..8 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -384,7 +384,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::XOR32_REG  => self.reg[dst] = (self.reg[dst] as u32             ^ self.reg[src] as u32) as u64,
             ebpf::MOV32_IMM  => {
                 self.reg[dst] = insn.imm as u32 as u64;
-                let tos = taint::address_mapping(dst as u64, 4);
+                let tos = CommonAddress::address_mapping(dst as u64, 4);
                 for i in 0..4 {
                     self.vm.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
@@ -392,8 +392,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::MOV32_REG  => {
                 self.reg[dst] = (self.reg[src] as u32) as u64;
                 let le_bytes_array = self.reg[src].to_le_bytes();
-                let froms = taint::address_mapping(src as u64, 4);
-                let tos = taint::address_mapping(dst as u64, 4);
+                let froms = CommonAddress::address_mapping(src as u64, 4);
+                let tos = CommonAddress::address_mapping(dst as u64, 4);
                 for i in 0..4 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -455,7 +455,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::XOR64_REG  => self.reg[dst] ^= self.reg[src],
             ebpf::MOV64_IMM  => {
                 self.reg[dst] =  insn.imm as u64;
-                let tos = taint::address_mapping(dst as u64, 8);
+                let tos = CommonAddress::address_mapping(dst as u64, 8);
                 for i in 0..8 {
                     self.vm.instrumenter.taint_engine.clear_taint(tos[i]);
                 }
@@ -463,8 +463,8 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
             ebpf::MOV64_REG  => {
                 self.reg[dst] =  self.reg[src];
                 let le_bytes_array = self.reg[src].to_le_bytes();
-                let froms = taint::address_mapping(src as u64, 8);
-                let tos = taint::address_mapping(dst as u64, 8);
+                let froms = CommonAddress::address_mapping(src as u64, 8);
+                let tos = CommonAddress::address_mapping(dst as u64, 8);
                 for i in 0..8 {
                     self.vm.instrumenter.taint_engine.propagate((insn.ptr * ebpf::INSN_SIZE) as u64 + MM_PROGRAM_TEXT_START, insn.opc, froms[i], tos[i], le_bytes_array[i]);
                 }
@@ -829,7 +829,7 @@ impl<'a, 'b, C: ContextObject> Interpreter<'a, 'b, C> {
                         // NovaFuzz: restore the taint engine
                         self.vm.instrumenter.taint_engine = saved_taint_engine;
                         // NovaFuzz: Clear the return value of the function taint state.
-                        let to_addrs = taint::address_mapping(self.reg[0] as u64, 8);
+                        let to_addrs = CommonAddress::address_mapping(self.reg[0] as u64, 8);
                         for i in 0..to_addrs.len(){
                             let to = to_addrs[i];
                             self.vm.instrumenter.taint_engine.state.remove(&to);
