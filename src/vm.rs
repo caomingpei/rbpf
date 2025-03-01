@@ -748,7 +748,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             self.instrumenter.semantic_input = semantic_input;
             self.instrumenter
                 .taint_engine
-                .activate(&self.instrumenter.semantic_input, vec![]);
+                .activate(&self.instrumenter.semantic_input);
 
             // let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
             // println!("Taint engine created");
