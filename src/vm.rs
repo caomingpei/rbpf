@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START, MM_PROGRAM_START};
-use common::types::{AccountAttribute, AccountInfo, Attribute, Input, SemanticMapping};
+use common::types::{AccountAttribute, Attribute, SemanticMapping};
 /// Instrumentation
 // use instrument::jump::JumpTracer;
 use instrument::Instrumenter;
@@ -421,14 +421,13 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         ptr: &mut usize,
         idx: u64,
         mapping: &mut HashMap<u64, Attribute>,
-    ) -> AccountInfo {
-        let mut account = AccountInfo::default();
+    ) {
         let mut input = self.extract_input_from_memory(
             memory_mapping,
             MM_INPUT_START as usize + *ptr,
             MM_INPUT_START as usize + *ptr + 1,
         );
-        account.duplicate = convert_bytes_to_num::<u8>(&input.clone());
+        let account_duplicate = convert_bytes_to_num::<u8>(&input.clone());
         mapping.insert(
             *ptr as u64,
             Attribute::Account {
@@ -437,7 +436,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             },
         );
         *ptr += 1;
-        if account.duplicate != 0xff_u8 {
+        if account_duplicate != 0xff_u8 {
             // 7 bytes padding
             for i in 0..7 {
                 mapping.insert(
@@ -455,7 +454,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 1,
             );
-            account.is_signer = convert_bytes_to_num::<u8>(&input.clone()) == 1;
+            // let account_is_signer = convert_bytes_to_num::<u8>(&input.clone()) == 1;
             mapping.insert(
                 *ptr as u64,
                 Attribute::Account {
@@ -470,7 +469,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 1,
             );
-            account.is_writable = convert_bytes_to_num::<u8>(&input.clone()) == 1;
+            // let account_is_writable = convert_bytes_to_num::<u8>(&input.clone()) == 1;
             mapping.insert(
                 *ptr as u64,
                 Attribute::Account {
@@ -485,7 +484,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 1,
             );
-            account.is_executable = convert_bytes_to_num::<u8>(&input.clone()) == 1;
+            // let account_is_executable = convert_bytes_to_num::<u8>(&input.clone()) == 1;
             mapping.insert(
                 *ptr as u64,
                 Attribute::Account {
@@ -500,7 +499,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 4,
             );
-            account.padding = convert_bytes_to_num::<[u8; 4]>(&input.clone());
+            // let account_padding = convert_bytes_to_num::<[u8; 4]>(&input.clone());
             for i in 0..4 {
                 mapping.insert(
                     *ptr as u64 + i,
@@ -517,7 +516,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 32,
             );
-            account.pubkey = convert_bytes_to_num::<[u8; 32]>(&input.clone());
+            // let account_pubkey = convert_bytes_to_num::<[u8; 32]>(&input.clone());
             for i in 0..32 {
                 mapping.insert(
                     *ptr as u64 + i,
@@ -534,7 +533,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 32,
             );
-            account.owner_pubkey = convert_bytes_to_num::<[u8; 32]>(&input.clone());
+            // let account_owner_pubkey = convert_bytes_to_num::<[u8; 32]>(&input.clone());
             for i in 0..32 {
                 mapping.insert(
                     *ptr as u64 + i,
@@ -550,7 +549,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 8,
             );
-            account.lamports = convert_bytes_to_num::<[u8; 8]>(&input.clone());
+            // let account_lamports = convert_bytes_to_num::<[u8; 8]>(&input.clone());
             for i in 0..8 {
                 mapping.insert(
                     *ptr as u64 + i,
@@ -566,7 +565,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 8,
             );
-            account.data_len = convert_bytes_to_num::<[u8; 8]>(&input.clone());
+            // let account_data_len = convert_bytes_to_num::<[u8; 8]>(&input.clone());
             let data_len = convert_bytes_to_num::<u64>(&input.clone());
             for i in 0..8 {
                 mapping.insert(
@@ -593,7 +592,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     },
                 );
             }
-            account.data = input.to_vec().clone();
+            // let account_data = input.to_vec().clone();
             *ptr += data_len as usize;
 
             input = self.extract_input_from_memory(
@@ -610,9 +609,9 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     },
                 );
             }
-            for i in 0..10240 {
-                account.realloc_data[i] = input[i].clone();
-            }
+            // for i in 0..10240 {
+            //     account.realloc_data[i] = input[i].clone();
+            // }
             *ptr += 10240;
 
             if *ptr % 8 != 0 {
@@ -622,7 +621,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                     MM_INPUT_START as usize + *ptr,
                     MM_INPUT_START as usize + *ptr + align_size,
                 );
-                account.align_data = input.to_vec().clone();
+                // account.align_data = input.to_vec().clone();
                 for i in 0..align_size {
                     mapping.insert(
                         *ptr as u64 + i as u64,
@@ -640,7 +639,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
                 MM_INPUT_START as usize + *ptr,
                 MM_INPUT_START as usize + *ptr + 8,
             );
-            account.rent_epoch = convert_bytes_to_num::<[u8; 8]>(&input.clone());
+            // account.rent_epoch = convert_bytes_to_num::<[u8; 8]>(&input.clone());
             for i in 0..8 {
                 mapping.insert(
                     *ptr as u64 + i as u64,
@@ -652,12 +651,11 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             }
             *ptr += 8;
         }
-        return account;
     }
 
     pub fn parse_input_from_memory(&self, memory_mapping: &MemoryMapping) -> SemanticMapping {
         let mut top_ptr: usize = 0 as usize;
-        let mut mapping: HashMap<u64, Attribute> = HashMap::new();
+        let mut mapping: SemanticMapping = HashMap::new();
 
         let mut input = self.extract_input_from_memory(
             memory_mapping,
@@ -668,11 +666,11 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         for i in 0..8 {
             mapping.insert(top_ptr as u64 + i, Attribute::NumberAccount);
         }
-        let mut accounts: Vec<AccountInfo> = vec![];
+        // let mut accounts: Vec<AccountInfo> = vec![];
         top_ptr += 8;
         for idx in 0..account_number {
-            let account = self.parse_account(&memory_mapping, &mut top_ptr, idx, &mut mapping);
-            accounts.push(account);
+            self.parse_account(&memory_mapping, &mut top_ptr, idx, &mut mapping);
+            // accounts.push(account);
         }
 
         input = self.extract_input_from_memory(
@@ -686,15 +684,15 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         }
         top_ptr += 8;
         // TODO: check if this is correct
-        let mut input_converted = Input::new(account_number, instruction_number);
-        input_converted.accounts = accounts.clone();
+        // let mut input_converted = Input::new(account_number, instruction_number);
+        // input_converted.accounts = accounts.clone();
 
         input = self.extract_input_from_memory(
             memory_mapping,
             MM_INPUT_START as usize + top_ptr,
             MM_INPUT_START as usize + top_ptr + instruction_number as usize,
         );
-        input_converted.instructions = input.clone();
+        // input_converted.instructions = input.clone();
         for i in 0..instruction_number as u64 {
             mapping.insert(
                 top_ptr as u64 + i,
@@ -708,12 +706,12 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             MM_INPUT_START as usize + top_ptr,
             MM_INPUT_START as usize + top_ptr + 32,
         );
-        input_converted.program_id = convert_bytes_to_num::<[u8; 32]>(&input.clone());
+        // input_converted.program_id = convert_bytes_to_num::<[u8; 32]>(&input.clone());
         for i in 0..32 {
             mapping.insert(top_ptr as u64 + i, Attribute::ProgramId);
         }
         top_ptr += 32;
-        SemanticMapping::new(input_converted, mapping)
+        mapping
     }
 
     /// Execute the program
@@ -750,7 +748,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
             self.instrumenter.semantic_input = semantic_input;
             self.instrumenter
                 .taint_engine
-                .activate(&self.instrumenter.semantic_input.mapping, vec![]);
+                .activate(&self.instrumenter.semantic_input, vec![]);
 
             // let taint_engine = taint::TaintEngine::new(semantic_mapping, self.sender_manager);
             // println!("Taint engine created");
