@@ -708,7 +708,7 @@ impl<'a, C: ContextObject> EbpfVm<'a, C> {
         );
         // input_converted.program_id = convert_bytes_to_num::<[u8; 32]>(&input.clone());
         for i in 0..32 {
-            mapping.insert(top_ptr as u64 + i, Attribute::ProgramId);
+            mapping.insert(top_ptr as u64 + i, Attribute::ProgramId { index: i as u8 });
         }
         top_ptr += 32;
         mapping
