@@ -361,7 +361,7 @@ macro_rules! declare_builtin_function {
         $arg_d:ident : u64,
         $arg_e:ident : u64,
         $memory_mapping:ident : &mut $MemoryMapping:ty,
-        instrumenter: &mut Instrumenter,
+        $instrumenter:ident : &mut Instrumenter,
     ) -> $Result:ty { $($rust:tt)* }) => {
         $(#[$attr])*
         pub struct $name {}
@@ -375,6 +375,7 @@ macro_rules! declare_builtin_function {
                 $arg_d: u64,
                 $arg_e: u64,
                 $memory_mapping: &mut $MemoryMapping,
+                $instrumenter: &mut Instrumenter,
             ) -> $Result {
                 $($rust)*
             }
@@ -388,24 +389,25 @@ macro_rules! declare_builtin_function {
                 $arg_d: u64,
                 $arg_e: u64,
             ) {
+                println!("====================================");
                 println!("Function name: {}", stringify!($name));
+                println!("====================================");
                 if stringify!($name) == "SyscallTryFindProgramAddress" {
-                    println!("SyscallTryFindProgramAddress");
-                }
-                use $crate::vm::ContextObject;
-                let vm = unsafe {
-                    &mut *(($vm as *mut u64).offset(-($crate::vm::get_runtime_environment_key() as isize)) as *mut $crate::vm::EbpfVm<$ContextObject>)
-                };
-                let config = vm.loader.get_config();
-                if config.enable_instruction_meter {
-                    vm.context_object_pointer.consume(vm.previous_instruction_meter - vm.due_insn_count);
-                }
-                let converted_result: $crate::error::ProgramResult = Self::rust $(::<$($generic_ident),+>)?(
-                    vm.context_object_pointer, $arg_a, $arg_b, $arg_c, $arg_d, $arg_e, &mut vm.memory_mapping,
-                ).map_err(|err| $crate::error::EbpfError::SyscallError(err)).into();
-                vm.program_result = converted_result;
-                if config.enable_instruction_meter {
-                    vm.previous_instruction_meter = vm.context_object_pointer.get_remaining();
+                    use $crate::vm::ContextObject;
+                    let vm = unsafe {
+                        &mut *(($vm as *mut u64).offset(-($crate::vm::get_runtime_environment_key() as isize)) as *mut $crate::vm::EbpfVm<$ContextObject>)
+                    };
+                    let config = vm.loader.get_config();
+                    if config.enable_instruction_meter {
+                        vm.context_object_pointer.consume(vm.previous_instruction_meter - vm.due_insn_count);
+                    }
+                    let converted_result: $crate::error::ProgramResult = Self::rust $(::<$($generic_ident),+>)?(
+                        vm.context_object_pointer, $arg_a, $arg_b, $arg_c, $arg_d, $arg_e, &mut vm.memory_mapping, &mut vm.instrumenter,
+                    ).map_err(|err| $crate::error::EbpfError::SyscallError(err)).into();
+                    vm.program_result = converted_result;
+                    if config.enable_instruction_meter {
+                        vm.previous_instruction_meter = vm.context_object_pointer.get_remaining();
+                    }
                 }
             }
         }
