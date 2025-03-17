@@ -28,6 +28,7 @@ use std::sync::Mutex;
 
 use common::consts::{INPUT_MAX_SIZE, MM_INPUT_START, MM_PROGRAM_START};
 use common::types::{AccountAttribute, Attribute, SemanticMapping};
+use instrument::taint::taint_save_log;
 /// Instrumentation
 // use instrument::jump::JumpTracer;
 use instrument::Instrumenter;
