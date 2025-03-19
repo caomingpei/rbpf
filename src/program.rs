@@ -389,9 +389,9 @@ macro_rules! declare_builtin_function {
                 $arg_d: u64,
                 $arg_e: u64,
             ) {
-                println!("====================================");
-                println!("Function name: {}", stringify!($name));
-                println!("====================================");
+                // println!("====================================");
+                // println!("Function name: {}", stringify!($name));
+                // println!("====================================");
                 if stringify!($name) == "SyscallTryFindProgramAddress" {
                     use $crate::vm::ContextObject;
                     let vm = unsafe {
