@@ -389,10 +389,11 @@ macro_rules! declare_builtin_function {
                 $arg_d: u64,
                 $arg_e: u64,
             ) {
-                // println!("====================================");
-                // println!("Function name: {}", stringify!($name));
-                // println!("====================================");
-                if stringify!($name) == "SyscallTryFindProgramAddress" {
+
+                if stringify!($name) == "SyscallTryFindProgramAddress" || stringify!($name) == "SyscallLog" {
+                    println!("====================================");
+                    println!("Function name: {}", stringify!($name));
+                    println!("====================================");
                     use $crate::vm::ContextObject;
                     let vm = unsafe {
                         &mut *(($vm as *mut u64).offset(-($crate::vm::get_runtime_environment_key() as isize)) as *mut $crate::vm::EbpfVm<$ContextObject>)
@@ -447,6 +448,9 @@ macro_rules! declare_builtin_function {
                 $arg_d: u64,
                 $arg_e: u64,
             ) {
+                // println!("====================================");
+                // println!("NovaFuzzer Function name: {}", stringify!($name));
+                // println!("====================================");
                 use $crate::vm::ContextObject;
                 let vm = unsafe {
                     &mut *(($vm as *mut u64).offset(-($crate::vm::get_runtime_environment_key() as isize)) as *mut $crate::vm::EbpfVm<$ContextObject>)
